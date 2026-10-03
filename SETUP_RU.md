@@ -1,5 +1,34 @@
 # Полная установка с нуля
 
+## ⚡ Что уже сделано за тебя
+
+На этом компьютере уже готово:
+
+- ✅ **Python 3.12** установлен (`C:\Users\nikit\AppData\Local\Programs\Python\Python312`)
+- ✅ **Git** установлен
+- ✅ **Виртуальное окружение** `.venv` создано, все зависимости стоят
+- ✅ **80 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
+- ✅ **Git-репозиторий** инициализирован, ветка `main`, 4 коммита, секретов внутри нет
+- ✅ Файл `.env` создан
+
+## 🎯 Твой план (осталось 5 шагов)
+
+| # | Шаг | Где | Время |
+| --- | --- | --- | --- |
+| 1 | Перевыпустить токен бота | Telegram, @BotFather | 1 мин |
+| 2 | Получить ключ Gemini | aistudio.google.com | 2 мин |
+| 3 | Записать оба ключа в `.env` | этот ПК | 2 мин |
+| 4 | Выложить код на GitHub | github.com | 5 мин |
+| 5 | Развернуть на Render + keep-alive | render.com, cron-job.org | 15 мин |
+
+> ⚠️ **Важно про твой интернет.** Я проверил сеть: у тебя **провайдер блокирует
+> Telegram** (соединение до `api.telegram.org` зависает, а Google работает).
+> Поэтому **локальный запуск `python bot.py` без VPN не заработает** — это не
+> баг и не ошибка в коде. Правильный путь для тебя — сразу **шаг 4–5 (Render)**:
+> оттуда Telegram доступен, и бот заработает 24/7. Подробнее — раздел **15.1**.
+
+---
+
 ## 0. Что тебе понадобится
 
 - **[Telegram](https://telegram.org)** — аккаунт.
@@ -10,6 +39,10 @@
 - **[Render](https://render.com)** — бесплатный хостинг, где бот будет работать 24/7.
 
 ## 1. Установи Python
+
+> ✅ **Уже сделано на этом ПК** — Python 3.12 установлен. Пропусти этот шаг.
+
+Если ставишь на другой компьютер:
 
 1. Скачай и установи Python с [python.org](https://python.org) (поставь галочку *Add Python to PATH*).
 2. Открой терминал и проверь:
@@ -22,9 +55,14 @@ python --version
 
 ## 2. Создай Telegram-бота
 
+> ⚠️ **Твой токен утёк в чат — его нужно перевыпустить.** Это первое, что
+> сделай. Старый токен больше нигде не используй.
+
 1. Открой Telegram и найди **@BotFather**.
-2. Отправь команду `/newbot`.
-3. Придумай имя (отображается в чате) и username (заканчивается на `bot`, например `my_ai_2026_bot`).
+2. Если бот уже есть — отправь `/mybots` → выбери бота → **API Token** → **Revoke**.
+   BotFather выдаст **новый** токен.
+3. Если бота ещё нет — отправь `/newbot`, придумай имя и username
+   (заканчивается на `bot`, например `my_ai_2026_bot`).
 4. BotFather пришлёт токен вида `123456789:ABCdef...`.
 5. Скопируй его — он пригодится в шаге 6.
 
@@ -45,16 +83,18 @@ python --version
 
 ## 4. Скачай проект
 
-Если проект ещё не скачан — клонируй репозиторий или распакуй архив.
-Открой терминал в папке проекта:
+> ✅ **Уже сделано.** Проект лежит в `C:\Users\nikit\Desktop\my_ai_telegram_bot`.
+> Открой терминал в этой папке:
 
 ```
-cd my_ai_telegram_bot
+cd C:\Users\nikit\Desktop\my_ai_telegram_bot
 ```
 
 ## 5. Установи зависимости
 
-Windows:
+> ✅ **Уже сделано** — окружение `.venv` создано, зависимости установлены.
+
+Если ставишь на другой компьютер:
 
 ```
 python -m venv .venv
@@ -64,43 +104,48 @@ pip install -r requirements.txt
 
 ## 6. Настрой переменные окружения
 
-1. Скопируй `.env.example` в `.env`:
+> ✅ **Файл `.env` уже создан**, но в нём не хватает ключа Gemini, а токен нужно
+> заменить на перевыпущенный (шаг 2).
+
+1. Открой файл `.env` в блокноте (или в VS Code).
+2. Впиши **новый** токен и ключ Gemini:
 
 ```
-copy .env.example .env
-```
-
-2. Открой `.env` в текстовом редакторе и замени значения:
-
-```
-BOT_TOKEN=123456789:ABCdef...       ← токен от BotFather
-GEMINI_API_KEY=...                  ← ключ из Google AI Studio
+BOT_TOKEN=новый_токен_от_BotFather
+GEMINI_API_KEY=ключ_из_Google_AI_Studio
 PUBLIC_URL=                         ← пока оставь пустым!
-WEBHOOK_SECRET=очень_длинный_случайный_секрет
+WEBHOOK_SECRET=придумай_длинную_случайную_строку
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_FALLBACK_MODEL=gemini-2.5-flash-lite
 ```
 
-## 7. Первый запуск (локально)
+> `.env` уже в `.gitignore` — в GitHub он не попадёт.
 
-Сначала проверь, что токен и ключ рабочие (этот скрипт реально обращается к
-Telegram и Gemini и говорит, что именно не так):
+## 7. Проверь настройки (локально)
 
-```
-python check_setup.py
-```
-
-Затем запусти бота. Когда `PUBLIC_URL` пуст — он автоматически переключается
-в **long polling**:
+Проверь, что токен и ключ рабочие — этот скрипт реально обращается к Telegram и
+Gemini и говорит, что именно не так:
 
 ```
-python bot.py
+.venv\Scripts\python.exe check_setup.py
 ```
 
-Или то же самое через совместимый вход:
+Что ты увидишь на своём ПК:
+
+- **Gemini** — должен написать `[OK] Gemini gemini-2.5-flash: 'ок'`.
+  Если `[FAIL]` — проверь ключ.
+- **Telegram** — напишет `[FAIL] Нет соединения с Telegram`. **Это ожидаемо**:
+  твой провайдер блокирует Telegram. На работу бота на Render это не влияет.
+
+### Запуск бота локально (`python bot.py`)
+
+> ⚠️ **У тебя без VPN не заработает** — провайдер блокирует Telegram.
+> Это не баг. Просто переходи к шагу 8 (GitHub → Render), там всё заработает.
+
+Если всё-таки хочешь запустить локально (нужен **VPN**):
 
 ```
-python polling.py
+.venv\Scripts\python.exe bot.py
 ```
 
 Бот напишет `Polling as @your_bot_username — press Ctrl+C to stop`.
@@ -108,58 +153,62 @@ python polling.py
 
 > **Это НЕ 24/7.** Бот работает пока открыт терминал. Для круглосуточной работы — шаги 8–11.
 
-> **Если вместо запуска ошибка `ConnectTimeout`** — значит твой провайдер
-> блокирует Telegram. Это не баг: см. раздел **15.1** ниже. В этом случае
-> просто переходи к деплою на Render (шаг 8) — там всё заработает.
-
 ## 8. Отправь проект в GitHub
 
-1. Создай новый пустой репозиторий на [github.com/new](https://github.com/new).
-2. В терминале:
+> ✅ **Git уже инициализирован** — ветка `main`, 4 коммита. Нужно только создать
+> репозиторий на GitHub и привязать его.
+
+1. Открой [github.com/new](https://github.com/new).
+2. **Repository name**: `my-ai-telegram-bot` (или любое своё).
+3. Тип: **Public** (или Private — Render работает с обоими).
+4. **НЕ** ставь галочки *Add README* / *.gitignore* / *license* — репозиторий должен быть пустым.
+5. Нажми **Create repository**.
+6. Скопируй URL вида `https://github.com/ТВОЙ_НИК/my-ai-telegram-bot.git`.
+7. В терминале (в папке проекта) выполни:
 
 ```
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/ТВОЙ_НИК/ТВОЙ_РЕПО.git
+git remote add origin https://github.com/ТВОЙ_НИК/my-ai-telegram-bot.git
 git push -u origin main
 ```
 
+> При первом `push` Git откроет окно входа в GitHub. Войди через браузер —
+> и код загрузится. Если пароль не принимается, нужен **Personal Access Token**
+> (GitHub → Settings → Developer settings → Tokens) вместо пароля.
+
 ## 9. Деплой на Render
 
-1. Войди на [render.com](https://render.com) (или зарегистрируйся через GitHub).
-2. Нажми **New → Blueprint from GitHub Repo**.
-3. Выбери свой репозиторий → **Continue**.
-4. Render подхватит `render.yaml` автоматически. Проверь:
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `uvicorn bot:app --host 0.0.0.0 --port $PORT`
-   - **Plan**: Free
-5. В **Advanced** раскрой **Environment Variables** и добавь:
+1. Войди на [render.com](https://render.com) → **Sign in with GitHub**.
+2. Нажми **New → Blueprint**.
+3. Выбери свой репозиторий → **Connect**.
+4. Render прочитает `render.yaml` и попросит заполнить **два** поля:
 
-| Ключ | Значение |
-| --- | --- |
-| `BOT_TOKEN` | токен от BotFather |
-| `GEMINI_API_KEY` | ключ из Google AI Studio |
-| `PUBLIC_URL` | пока **оставь пустым** — заполнишь после деплоя |
-| `WEBHOOK_SECRET` | длинная случайная строка |
-| `GEMINI_MODEL` | `gemini-2.5-flash` |
-| `GEMINI_FALLBACK_MODEL` | `gemini-2.5-flash-lite` |
+   | Ключ | Значение |
+   | --- | --- |
+   | `BOT_TOKEN` | новый токен от BotFather (шаг 2) |
+   | `GEMINI_API_KEY` | ключ из Google AI Studio (шаг 3) |
 
-6. Нажми **Apply**. Начнётся деплой (3–5 минут).
+   Остальное Render настроит сам:
+   - `WEBHOOK_SECRET` — сгенерирует случайный;
+   - `GEMINI_MODEL` / `GEMINI_FALLBACK_MODEL` — уже прописаны;
+   - адрес сервиса для webhook — подставится автоматически (переменная
+     `RENDER_EXTERNAL_URL`), вручную ничего указывать не нужно.
 
-## 10. Подключи вебхук
+5. Нажми **Apply**. Начнётся деплой (3–5 минут). Дождись статуса **Live**.
 
-1. Когда Render покажет зелёный индикатор (Service is live), скопируй URL сервиса.
-   Он вида: `https://my-ai-telegram-bot-xxxx.onrender.com`
-2. В настройках сервиса на Render, в разделе **Environment Variables**, впиши:
+> ✅ Раньше нужно было вручную вписывать `PUBLIC_URL` и передеплоить — теперь
+> это не требуется, всё делается в один заход.
+
+## 10. Проверь, что webhook поднялся
+
+1. В Render открой свой сервис → вкладка **Logs**.
+2. Найди строку:
 
 ```
-PUBLIC_URL = https://my-ai-telegram-bot-xxxx.onrender.com
+Webhook configured: True
 ```
 
-3. Нажми **Manual Deploy** (или **Advanced → Manual Deploy**), чтобы перезапустить сервис.
-4. При запуске бот сам зарегистрирует Telegram webhook — проверь **Logs** (вкладка Logs в Render): должно быть `Webhook configured`.
+3. Значит, бот подключён к Telegram и готов отвечать. Если строки нет — подожди
+   ещё минуту или нажми **Manual Deploy → Deploy latest commit**.
 
 > **Не добавляй** `/telegram/...` вручную — приложение делает это само.
 
@@ -256,14 +305,13 @@ python check_setup.py
 **Проверка окружения** — реально дёргает Telegram и Gemini и говорит, что не так:
 
 ```
-python check_setup.py
+.venv\Scripts\python.exe check_setup.py
 ```
 
-**Тесты** — 77 офлайн-тестов, сеть не нужна:
+**Тесты** — 80 офлайн-тестов, сеть не нужна:
 
 ```
-pip install -r requirements.txt -r requirements-dev.txt
-pytest -q
+.venv\Scripts\python.exe -m pytest -q
 ```
 
 Все тесты должны быть зелёными. Если какой-то упал — посмотри его название,

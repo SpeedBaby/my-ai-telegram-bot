@@ -425,3 +425,29 @@ def test_split_text_single_paragraph_no_break():
     text = "a" * 50
     chunks = bot._split_text(text, 100)
     assert chunks == [text]
+
+
+# ---------------------------------------------------------------------------
+# _resolve_public_url (webhook-адрес)
+# ---------------------------------------------------------------------------
+
+
+def test_public_url_prefers_explicit_public_url(monkeypatch):
+    monkeypatch.setenv("PUBLIC_URL", "https://my-domain.com/")
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://render.onrender.com")
+
+    assert bot._resolve_public_url() == "https://my-domain.com"
+
+
+def test_public_url_falls_back_to_render_external_url(monkeypatch):
+    monkeypatch.delenv("PUBLIC_URL", raising=False)
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://my-bot.onrender.com/")
+
+    assert bot._resolve_public_url() == "https://my-bot.onrender.com"
+
+
+def test_public_url_empty_when_nothing_set(monkeypatch):
+    monkeypatch.delenv("PUBLIC_URL", raising=False)
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+
+    assert bot._resolve_public_url() == ""

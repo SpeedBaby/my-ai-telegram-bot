@@ -56,8 +56,27 @@ if not BOT_TOKEN:
         "BOT_TOKEN не задан. Добавь его в файл .env "
         "(токен выдаёт @BotFather командой /newbot или /token)."
     )
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
+
+# Публичный адрес нужен, чтобы зарегистрировать Telegram webhook.
+# На Render переменная RENDER_EXTERNAL_URL подставляется автоматически, поэтому
+# вручную PUBLIC_URL задавать не обязательно. PUBLIC_URL остаётся для своего домена.
+def _resolve_public_url() -> str:
+    """Взять PUBLIC_URL, иначе RENDER_EXTERNAL_URL (Render), без завершающего /."""
+    return (
+        os.environ.get("PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or ""
+    ).rstrip("/")
+
+
+PUBLIC_URL = _resolve_public_url()
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "").strip()
+if not WEBHOOK_SECRET or WEBHOOK_SECRET == "change-me":
+    # На Render секрет можно не задавать (в render.yaml стоит generateValue),
+    # а для локального запуска он не нужен вовсе. На всякий случай генерируем.
+    WEBHOOK_SECRET = secrets.token_urlsafe(32)
+    log.warning(
+        "WEBHOOK_SECRET не задан — сгенерирован случайный на этот запуск. "
+        "Для стабильной работы задай его в переменных окружения."
+    )
 WEBHOOK_PATH = f"/telegram/{WEBHOOK_SECRET}"
 
 # Optional: comma-separated Telegram user IDs. Empty = bot is open to everyone.
@@ -353,18 +372,7 @@ async def process_update(update: dict):
 
 
 async def set_webhook():
-    if not PUBLIC_URL:
-        log.warning("PUBLIC_URL is not set; webhook was not configured.")
-        return
-
     webhook_url = f"{PUBLIC_URL}{WEBHOOK_PATH}"
-    if not WEBHOOK_SECRET or WEBHOOK_SECRET == "change-me":
-        log.error(
-            "WEBHOOK_SECRET not set — webhook mode would be insecure. "
-            "Set it in Render or use long polling (no PUBLIC_URL)."
-        )
-        return
-
     result = await tg(
         "setWebhook",
         url=webhook_url,
@@ -375,12 +383,21 @@ async def set_webhook():
     log.info("Webhook configured: %s", result)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+async def _configure_webhook() -> None:
     try:
         await set_webhook()
     except Exception:
         log.exception("Could not configure Telegram webhook")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Не блокируем старт сервиса: Telegram иногда отвечает медленно, а
+    # health-check Render должен проходить сразу.
+    if PUBLIC_URL:
+        spawn(_configure_webhook())
+    else:
+        log.warning("PUBLIC_URL is not set; webhook was not configured.")
     yield
 
 
@@ -394,10 +411,6 @@ async def health():
 
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
-    # Never accept updates when the secret was left at its default value.
-    if not WEBHOOK_SECRET or WEBHOOK_SECRET == "change-me":
-        return PlainTextResponse("webhook secret is not configured", status_code=503)
-
     # Telegram sends the secret token in this header.
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if not secrets.compare_digest(secret or "", WEBHOOK_SECRET):

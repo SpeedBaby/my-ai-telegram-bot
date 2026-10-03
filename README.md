@@ -46,7 +46,15 @@ python bot.py
 
 ## Деплой
 
-Загрузи проект в GitHub и создай на Render новый Web Service из репозитория.
+Загрузи проект в GitHub, затем на Render нажми **New → Blueprint** и укажи
+репозиторий — он подхватит `render.yaml`.
+
+Render попросит только `BOT_TOKEN` и `GEMINI_API_KEY`. Остальное настроится само:
+`WEBHOOK_SECRET` Render сгенерирует, а адрес сервиса для webhook возьмётся из
+автоматической переменной `RENDER_EXTERNAL_URL` — вручную `PUBLIC_URL` задавать
+не нужно.
+
+Стандартный ручной вариант (без Blueprint):
 
 Build:
 pip install -r requirements.txt
@@ -54,19 +62,12 @@ pip install -r requirements.txt
 Start:
 uvicorn bot:app --host 0.0.0.0 --port $PORT
 
-После создания сервиса Render выдаст URL вида:
-https://my-ai-telegram-bot.onrender.com
-
-Поставь его в переменную PUBLIC_URL — и бот сам зарегистрирует Telegram webhook.
-
-Быстрый вариант: на Render нажми **New → Blueprint** и укажи репозиторий — он подхватит `render.yaml`.
-
 ## Переменные Render
 
-BOT_TOKEN = токен от BotFather
-GEMINI_API_KEY = ключ Gemini API
-PUBLIC_URL = URL Render без завершающего /
-WEBHOOK_SECRET = длинная случайная строка (без неё webhook не включается)
+BOT_TOKEN = токен от BotFather (обязательно)
+GEMINI_API_KEY = ключ Gemini API (обязательно)
+PUBLIC_URL = необязательно; нужен только для своего домена, на Render подставляется сам
+WEBHOOK_SECRET = необязательно; Render генерирует случайный
 GEMINI_MODEL = gemini-2.5-flash
 GEMINI_FALLBACK_MODEL = gemini-2.5-flash-lite
 ALLOWED_USERS = пусто (всем) или ID через запятую
@@ -84,7 +85,7 @@ AI_MAX_RETRIES = 3
 
 ## Тесты
 
-В проекте есть 77 офлайн-тестов (без реальных запросов к Telegram и Gemini):
+В проекте есть 80 офлайн-тестов (без реальных запросов к Telegram и Gemini):
 
 ```
 pip install -r requirements.txt -r requirements-dev.txt
