@@ -49,6 +49,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+# httpx печатает полный URL запроса, а в нём — токен бота. Гасим его логи,
+# чтобы токен не утекал в логи Render.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("ai-bot")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
