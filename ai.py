@@ -28,8 +28,8 @@ if not GEMINI_API_KEY:
 # Primary model and a fallback for when the primary one hits its free quota.
 # Both are multimodal (text + images). Change via env vars if Google renames them.
 # Пустая переменная окружения не должна ломать запуск — берём значение по умолчанию.
-PRIMARY_MODEL = os.environ.get("GEMINI_MODEL") or "gemini-3.8-flash"
-FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
+PRIMARY_MODEL = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
+FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL") or "gemini-2.5-flash-lite"
 
 MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "20"))
 MAX_RETRIES = int(os.environ.get("AI_MAX_RETRIES", "3"))
@@ -134,12 +134,13 @@ def _is_rate_limit(exc: Exception) -> bool:
 # ---------------------------------------------------------------------------
 
 # Preferred order when the configured model name turns out to be unavailable.
+# Google ограничивает доступ к 2.5-моделям для новых ключей, поэтому держим
+# в конце проверенные gemini-2.0-*.
 _PREFERRED = (
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
 )
 
 
@@ -171,6 +172,20 @@ def _pick_alternative(available: list[str], exclude: str) -> str | None:
             return model
     for model in available:
         if model != exclude:
+            return model
+    return None
+
+
+def _pick_available(available: list[str], tried: set[str]) -> str | None:
+    """Лучшая доступная модель, которую мы ещё не пробовали."""
+    for candidate in _PREFERRED:
+        if candidate in available and candidate not in tried:
+            return candidate
+    for model in available:
+        if "flash" in model and model not in tried:
+            return model
+    for model in available:
+        if model not in tried:
             return model
     return None
 
@@ -228,22 +243,31 @@ async def ask_ai(
     image_mime: str | None = None,
 ) -> str:
     """
-    Ask the model. Tries the primary model with retries, then the fallback model.
+    Ask the model. Tries the primary model with retries, then the fallback.
+    Если модель недоступна (404), автоматически переходит на рабочую.
     Raises AIError with a user-friendly message if everything fails.
     """
     await _check_models_once()
 
     contents = _build_contents(history, user_message, image_bytes, image_mime)
 
-    models_to_try = [PRIMARY_MODEL]
+    models_to_try: list[str] = [PRIMARY_MODEL]
     if FALLBACK_MODEL and FALLBACK_MODEL != PRIMARY_MODEL:
         models_to_try.append(FALLBACK_MODEL)
 
+    tried: set[str] = set()
     last_error: Exception | None = None
-    failed_model = models_to_try[-1]
+    failed_model = PRIMARY_MODEL
 
-    for model in models_to_try:
+    index = 0
+    while index < len(models_to_try):
+        model = models_to_try[index]
+        index += 1
+        if model in tried:
+            continue
+        tried.add(model)
         failed_model = model
+
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 # google-genai call is blocking; keep FastAPI's event loop free.
@@ -260,13 +284,22 @@ async def ask_ai(
                     )
                     await asyncio.sleep(wait)
                     continue
-                if _status_code(exc) in (400, 404):
-                    # Bad request or unknown model name: no point in retrying this model.
-                    log.error("Model %s failed: %s", model, exc)
+                if _status_code(exc) == 404:
+                    # Unknown/retired model: find another one that really works.
+                    log.error("Model %s is not available for this key", model)
+                    available = await asyncio.to_thread(list_available_models)
+                    alternative = _pick_available(available, tried)
+                    if alternative and alternative not in models_to_try:
+                        log.warning("Switching to available model %s", alternative)
+                        models_to_try.append(alternative)
+                    break
+                if _status_code(exc) == 400:
+                    # Bad request: retrying or switching models won't help.
+                    log.error("Model %s rejected the request: %s", model, exc)
                     break
                 log.exception("Unexpected AI error on %s", model)
                 break
-        log.warning("Switching model after failure: %s", model)
+        log.warning("Model %s did not answer", model)
 
     if last_error and _is_rate_limit(last_error):
         raise AIError(
@@ -276,8 +309,8 @@ async def ask_ai(
         raise AIError("Неверный GEMINI_API_KEY или доступ к модели запрещён.")
     if _status_code(last_error) == 404:
         raise AIError(
-            f"Модель {failed_model} недоступна для этого GEMINI_API_KEY. "
-            "Проверь GEMINI_MODEL — актуальные имена: "
+            "Модель недоступна для этого GEMINI_API_KEY, и подобрать рабочую "
+            "не удалось. Проверь GEMINI_MODEL — актуальные имена: "
             "https://ai.google.dev/gemini-api/docs/models"
         )
     raise AIError("Не удалось получить ответ от AI. Попробуй позже.")

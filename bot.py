@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import sys
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 
 import httpx
@@ -120,6 +121,25 @@ UPLOAD_TIMEOUT = httpx.Timeout(120.0, connect=15.0)
 
 # Keep references to background tasks so the GC does not cancel them mid-flight.
 _background_tasks: set[asyncio.Task] = set()
+
+# Telegram повторяет доставку update, если сервис не ответил вовремя — а Render
+# Free просыпается 30–60 секунд, поэтому одно сообщение могло прийти несколько
+# раз и бот отвечал по 4 раза. Запоминаем недавние update_id и пропускаем дубли.
+_seen_update_ids: "OrderedDict[int, None]" = OrderedDict()
+_MAX_SEEN_UPDATES = 1000
+
+
+def _is_duplicate_update(update: dict) -> bool:
+    """True, если этот update_id уже обрабатывали (повторная доставка Telegram)."""
+    update_id = update.get("update_id")
+    if update_id is None:
+        return False
+    if update_id in _seen_update_ids:
+        return True
+    _seen_update_ids[update_id] = None
+    while len(_seen_update_ids) > _MAX_SEEN_UPDATES:
+        _seen_update_ids.popitem(last=False)
+    return False
 
 
 def spawn(coro) -> asyncio.Task:
@@ -466,6 +486,11 @@ async def telegram_webhook(request: Request):
         return PlainTextResponse("forbidden", status_code=403)
 
     update = await request.json()
+
+    # Telegram может доставить один и тот же update несколько раз — отвечаем один.
+    if _is_duplicate_update(update):
+        log.info("Duplicate update %s ignored", update.get("update_id"))
+        return PlainTextResponse("ok")
 
     # Return 200 immediately; AI processing continues in the background.
     spawn(process_update(update))

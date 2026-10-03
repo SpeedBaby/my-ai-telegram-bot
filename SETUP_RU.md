@@ -7,7 +7,7 @@
 - ✅ **Python 3.12** установлен (`C:\Users\nikit\AppData\Local\Programs\Python\Python312`)
 - ✅ **Git** установлен
 - ✅ **Виртуальное окружение** `.venv` создано, все зависимости стоят
-- ✅ **80 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
+- ✅ **95 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
 - ✅ **Git-репозиторий** инициализирован, ветка `main`, 4 коммита, секретов внутри нет
 - ✅ Файл `.env` создан
 
@@ -265,9 +265,11 @@ ALLOWED_USERS = 123456789
 | --- | --- |
 | `KeyError: 'BOT_TOKEN'` | Проверь, что BOT_TOKEN и GEMINI_API_KEY заданы в Render |
 | `Нет соединения с Telegram (ConnectTimeout)` | Telegram блокирует провайдер — см. раздел ниже |
-| `404 NOT_FOUND` от Gemini | Проверь название модели — см. [ai.google.dev/gemini-api/docs/models](https://ai.google.dev/gemini-api/docs/models) |
+| `404 NOT_FOUND` от Gemini | Модель недоступна ключу. Бот сам подберёт рабочую; если не вышло — смени `GEMINI_MODEL` на `gemini-2.0-flash` |
 | `429 RESOURCE_EXHAUSTED` | Исчерпан бесплатный лимит. Подожди минуту — бот сам попробует резервную модель |
+| Бот отвечает 2–4 раза на одно сообщение | Обычно из-за «сна» Render. Бот теперь пропускает повторные доставки; передеплой, чтобы обновилось |
 | `getMe: Unauthorized` | Неверный BOT_TOKEN |
+| `secret token contains illegal characters` | Секрет содержал недопустимые символы — бот чистит их сам |
 | `blocked` от Telegram | Перезапусти сервис на Render |
 | Бот молчит на Render | Открой `https://твой-url/health` в браузере, затем проверь **Logs** в Render |
 | Ошибка `Invalid markdown` | Бот автоматически переведёт ответ в plain text |
@@ -308,7 +310,7 @@ python check_setup.py
 .venv\Scripts\python.exe check_setup.py
 ```
 
-**Тесты** — 80 офлайн-тестов, сеть не нужна:
+**Тесты** — 95 офлайн-тестов, сеть не нужна:
 
 ```
 .venv\Scripts\python.exe -m pytest -q

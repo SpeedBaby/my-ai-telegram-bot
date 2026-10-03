@@ -77,15 +77,16 @@ AI_MAX_RETRIES = 3
 ## Что делать при ошибках
 
 - `ConnectTimeout` при `python bot.py` — провайдер блокирует Telegram (частая ситуация в РФ). Код и токен ни при чём: разворачивай на Render (оттуда Telegram доступен) или включи VPN. Проверить причину: `python check_setup.py`.
-- `404 NOT_FOUND` от Gemini — проверь точное название модели на странице https://ai.google.dev/gemini-api/docs/models
+- `404 NOT_FOUND` от Gemini — модель недоступна ключу. Бот сам подберёт рабочую из списка; если не вышло, поставь `GEMINI_MODEL=gemini-2.0-flash`.
 - `429 RESOURCE_EXHAUSTED` — исчерпан бесплатный лимит запросов, подожди или уменьши `AI_MAX_RETRIES`. Бот сам попробует запасную модель.
 - `418` или `blocked` — сработала фильтрация контента Gemini, ответ не отправлен.
+- Бот отвечает несколько раз на одно сообщение — Telegram повторил доставку, пока Render «просыпался». Бот теперь пропускает повторные `update_id`.
 - `getMe: Unauthorized` — неверный BOT_TOKEN.
 - Бот молчит на Render — открой `https://твой-url/health`, затем Logs в Render; проверь, что `PUBLIC_URL` начинается с `https://` и без `/` в конце.
 
 ## Тесты
 
-В проекте есть 80 офлайн-тестов (без реальных запросов к Telegram и Gemini):
+В проекте есть 95 офлайн-тестов (без реальных запросов к Telegram и Gemini):
 
 ```
 pip install -r requirements.txt -r requirements-dev.txt

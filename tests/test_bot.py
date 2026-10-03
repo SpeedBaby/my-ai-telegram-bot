@@ -523,3 +523,65 @@ def test_configure_webhook_does_not_crash_on_unknown_error(monkeypatch, caplog):
 
     with caplog.at_level(logging.ERROR, logger="ai-bot"):
         asyncio.run(bot._configure_webhook())  # не должно бросить исключение
+
+
+# ---------------------------------------------------------------------------
+# Дедупликация update_id (Telegram повторяет доставку при холодном старте)
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_update_is_flagged_only_once():
+    bot._seen_update_ids.clear()
+
+    assert bot._is_duplicate_update({"update_id": 111}) is False
+    assert bot._is_duplicate_update({"update_id": 111}) is True
+    assert bot._is_duplicate_update({"update_id": 112}) is False
+
+
+def test_update_without_id_is_never_a_duplicate():
+    bot._seen_update_ids.clear()
+
+    assert bot._is_duplicate_update({}) is False
+    assert bot._is_duplicate_update({}) is False
+
+
+def test_seen_update_ids_stay_bounded():
+    bot._seen_update_ids.clear()
+
+    for update_id in range(bot._MAX_SEEN_UPDATES + 50):
+        bot._is_duplicate_update({"update_id": update_id})
+
+    assert len(bot._seen_update_ids) <= bot._MAX_SEEN_UPDATES
+
+
+def test_webhook_endpoint_ignores_duplicate_delivery(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    bot._seen_update_ids.clear()
+    processed = []
+    monkeypatch.setattr(bot, "process_update", lambda update: update)
+    monkeypatch.setattr(bot, "spawn", lambda coro: processed.append(coro))
+
+    headers = {"X-Telegram-Bot-Api-Secret-Token": bot.WEBHOOK_SECRET}
+    update = _text_message("привет")
+
+    with TestClient(bot.app) as client:
+        r1 = client.post(bot.WEBHOOK_PATH, json=update, headers=headers)
+        r2 = client.post(bot.WEBHOOK_PATH, json=update, headers=headers)
+
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert processed == [update]  # одно и то же сообщение обработано ровно раз
+
+
+def test_webhook_endpoint_rejects_wrong_secret():
+    from fastapi.testclient import TestClient
+
+    with TestClient(bot.app) as client:
+        r = client.post(
+            bot.WEBHOOK_PATH,
+            json=_text_message("привет"),
+            headers={"X-Telegram-Bot-Api-Secret-Token": "definitely-wrong"},
+        )
+
+    assert r.status_code == 403

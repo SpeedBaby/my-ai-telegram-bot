@@ -112,9 +112,12 @@ def test_is_rate_limit_is_false_for_other_api_codes():
 
 
 def test_pick_alternative_follows_preferred_order():
-    available = ["gemini-2.5-flash", "gemini-3.5-flash", "my-custom-model"]
+    available = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
-    assert ai._pick_alternative(available, exclude="gemini-3.8-flash") == "gemini-3.5-flash"
+    assert (
+        ai._pick_alternative(available, exclude="gemini-2.5-flash")
+        == "gemini-2.5-flash-lite"
+    )
 
 
 def test_pick_alternative_falls_back_to_any_flash_model():
@@ -124,7 +127,22 @@ def test_pick_alternative_falls_back_to_any_flash_model():
 
 
 def test_pick_alternative_returns_none_when_only_the_excluded_model_exists():
-    assert ai._pick_alternative(["gemini-3.8-flash"], exclude="gemini-3.8-flash") is None
+    assert ai._pick_alternative(["gemini-2.5-flash"], exclude="gemini-2.5-flash") is None
+
+
+# ---------------------------------------------------------------------------
+# _pick_available (автоподбор модели, которую ещё не пробовали)
+# ---------------------------------------------------------------------------
+
+
+def test_pick_available_skips_already_tried_models():
+    available = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+
+    assert ai._pick_available(available, tried={"gemini-2.5-flash"}) == "gemini-2.5-flash-lite"
+
+
+def test_pick_available_returns_none_when_everything_tried():
+    assert ai._pick_available(["gemini-2.5-flash"], tried={"gemini-2.5-flash"}) is None
 
 
 def test_validate_models_switches_primary_when_name_is_retired(monkeypatch):
@@ -300,6 +318,23 @@ def test_ask_ai_404_recommends_model_check(fake_gemini, one_retry):
 
     assert "недоступна" in str(excinfo.value).lower()
     assert "GEMINI_MODEL" in str(excinfo.value)
+
+
+def test_ask_ai_switches_to_available_model_on_404(fake_gemini, one_retry):
+    """Обе заданные модели недоступны — берём рабочую из списка ключа."""
+    fake = fake_gemini(
+        responses={
+            ai.PRIMARY_MODEL: _api_error(404),
+            ai.FALLBACK_MODEL: _api_error(404),
+            "gemini-2.0-flash": "ответ от рабочей модели",
+        },
+        available=["gemini-2.0-flash"],
+    )
+
+    result = asyncio.run(ai.ask_ai("привет", []))
+
+    assert result == "ответ от рабочей модели"
+    assert "gemini-2.0-flash" in {call["model"] for call in fake.calls}
 
 
 def test_ask_ai_400_does_not_retry_the_same_model(fake_gemini, monkeypatch):
