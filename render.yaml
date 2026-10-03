@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: my-ai-telegram-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn bot:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_FALLBACK_MODEL
+        value: gemini-2.5-flash-lite
+      - key: ALLOWED_USERS
+        value: ""
+      - key: MAX_HISTORY_MESSAGES
+        value: "20"
+      - key: AI_MAX_RETRIES
+        value: "3"
