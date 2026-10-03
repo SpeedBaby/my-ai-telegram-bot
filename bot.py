@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import secrets
+import sys
 from contextlib import asynccontextmanager
 
 import httpx
@@ -21,6 +22,27 @@ load_dotenv()
 
 from ai import AIError, ask_ai  # noqa: E402  (must import after load_dotenv)
 from memory import add_message, clear_history, get_history  # noqa: E402
+
+
+def _force_utf8_console() -> None:
+    """Windows-консоль по умолчанию не понимает UTF-8 — включаем его."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+    except Exception:  # noqa: BLE001
+        pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+_force_utf8_console()
 
 logging.basicConfig(
     level=logging.INFO,

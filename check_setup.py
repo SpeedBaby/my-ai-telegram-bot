@@ -8,16 +8,73 @@
   2. GEMINI_API_KEY и имя модели — реальный генерационный запрос к Gemini.
   3. Состояние webhook — чтобы понять, в каком режиме работает бот.
 
+Если Telegram недоступен, скрипт сам определяет, это блокировка провайдером
+или пропавший интернет, и подсказывает, что делать.
+
 Ничего не меняет, можно запускать сколько угодно раз.
 Внимание: запрос к Gemini тратит одну строку бесплатного лимита.
 """
 
 import asyncio
 import os
+import socket
 import sys
 
 import httpx
 from dotenv import load_dotenv
+
+
+def _force_utf8_console() -> None:
+    """Windows-консоль по умолчанию не понимает UTF-8 — включаем его.
+
+    Без этого русский текст превращается в кракозябры.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+    except Exception:  # noqa: BLE001
+        pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+_force_utf8_console()
+
+# Хост-«свидетель»: если Google доступен, а Telegram — нет, значит интернет
+# работает, а Telegram блокируется провайдером (частая ситуация в РФ).
+CONTROL_HOST = "generativelanguage.googleapis.com"
+
+
+def _tcp_reachable(host: str, port: int = 443, timeout: float = 6.0) -> bool:
+    """Открыт ли TCP-порт. Прямая сокет-проверка, без кешей и прокси."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _explain_telegram_block() -> None:
+    """Объясняет, почему нет соединения с Telegram, и что с этим делать."""
+    if _tcp_reachable(CONTROL_HOST):
+        print("       Интернет есть (Google отвечает), но Telegram заблокирован")
+        print("       провайдером или файрволом — это не проблема кода и не токена.")
+        print()
+        print("       Что делать:")
+        print("       • Локальный запуск без VPN не заработает — это ожидаемо.")
+        print("       • Разверни бота на Render: оттуда Telegram доступен,")
+        print("         и бот будет работать 24/7 (SETUP_RU.md, шаги 8–11).")
+        print("       • Либо включи VPN и запусти проверку снова.")
+    else:
+        print("       Google тоже не отвечает — похоже, пропал интернет целиком.")
+        print("       Проверь подключение к сети и попробуй снова.")
 
 
 async def check_telegram(token: str) -> bool:
@@ -25,6 +82,11 @@ async def check_telegram(token: str) -> bool:
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.get(f"https://api.telegram.org/bot{token}/getMe")
             data = r.json()
+    except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout) as exc:
+        # Соединение вообще не устанавливается — это сеть, а не токен.
+        print(f"[FAIL] Нет соединения с Telegram ({type(exc).__name__}).")
+        _explain_telegram_block()
+        return False
     except Exception as exc:  # noqa: BLE001
         print(f"[FAIL] Telegram недоступен: {type(exc).__name__}: {exc}")
         return False
@@ -70,7 +132,9 @@ async def check_gemini(key: str) -> bool:
             contents="Ответь ровно одно слово: ок",
             config=types.GenerateContentConfig(
                 temperature=0.0,
-                max_output_tokens=10,
+                # У моделей 2.5 «размышления» тоже тратят этот лимит,
+                # поэтому берём с запасом, чтобы не получить пустой ответ.
+                max_output_tokens=256,
             ),
         )
     except Exception as exc:  # noqa: BLE001

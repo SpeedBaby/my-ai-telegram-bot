@@ -75,6 +75,7 @@ AI_MAX_RETRIES = 3
 
 ## Что делать при ошибках
 
+- `ConnectTimeout` при `python bot.py` — провайдер блокирует Telegram (частая ситуация в РФ). Код и токен ни при чём: разворачивай на Render (оттуда Telegram доступен) или включи VPN. Проверить причину: `python check_setup.py`.
 - `404 NOT_FOUND` от Gemini — проверь точное название модели на странице https://ai.google.dev/gemini-api/docs/models
 - `429 RESOURCE_EXHAUSTED` — исчерпан бесплатный лимит запросов, подожди или уменьши `AI_MAX_RETRIES`. Бот сам попробует запасную модель.
 - `418` или `blocked` — сработала фильтрация контента Gemini, ответ не отправлен.
