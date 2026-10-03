@@ -313,4 +313,11 @@ async def ask_ai(
             "не удалось. Проверь GEMINI_MODEL — актуальные имена: "
             "https://ai.google.dev/gemini-api/docs/models"
         )
-    raise AIError("Не удалось получить ответ от AI. Попробуй позже.")
+    # Всё остальное: показываем код, чтобы проблема была диагностируемой.
+    code = _status_code(last_error)
+    log.error("All models failed; last error on %s: %r", failed_model, last_error)
+    suffix = f" (код {code})" if code else ""
+    raise AIError(
+        f"Не удалось получить ответ от AI{suffix}. "
+        "Подробности — в логах сервиса."
+    )

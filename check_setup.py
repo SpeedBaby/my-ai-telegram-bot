@@ -127,6 +127,28 @@ async def check_gemini(key: str) -> bool:
 
     try:
         client = genai.Client(api_key=key)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[FAIL] Не удалось создать Gemini-клиент: {exc}")
+        return False
+
+    # Какие модели реально доступны этому ключу — это сразу проясняет 404.
+    available: list[str] = []
+    try:
+        for m in client.models.list():
+            name = (getattr(m, "name", "") or "").removeprefix("models/")
+            if name:
+                available.append(name)
+        if available:
+            print(f"[INFO] Доступно моделей: {len(available)}. Примеры: "
+                  f"{', '.join(sorted(available)[:10])}")
+            if model not in available:
+                print(f"[WARN] Заданная GEMINI_MODEL={model!r} в списке отсутствует.")
+        else:
+            print("[WARN] Список моделей пуст — ключ может быть без доступа к API.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] Не удалось получить список моделей: {type(exc).__name__}: {exc}")
+
+    try:
         response = await client.aio.models.generate_content(
             model=model,
             contents="Ответь ровно одно слово: ок",
@@ -141,9 +163,14 @@ async def check_gemini(key: str) -> bool:
         text = str(exc)
         print(f"[FAIL] Gemini, модель {model}: {type(exc).__name__}: {text[:400]}")
         if "404" in text or "not found" in text.lower():
-            print("       -> проверь GEMINI_MODEL: https://ai.google.dev/gemini-api/docs/models")
+            print("       -> модель недоступна ключу. Проверь GEMINI_MODEL.")
         elif "400" in text or "API key" in text:
             print("       -> проверь GEMINI_API_KEY: https://aistudio.google.com/apikey")
+        # Подскажем модель, которая точно доступна.
+        for candidate in ("gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.0-flash-lite"):
+            if candidate in available and candidate != model:
+                print(f"       -> попробуй GEMINI_MODEL={candidate}")
+                break
         return False
 
     answer = (response.text or "").strip()
