@@ -348,3 +348,80 @@ def test_failed_answer_is_not_saved_to_memory(sent, monkeypatch):
     asyncio.run(bot.process_update(_text_message("вопрос")))
 
     assert memory.get_history(100) == []
+
+
+# ---------------------------------------------------------------------------
+# Дополнительные проверки: фото, ответы, сплит
+# ---------------------------------------------------------------------------
+
+
+def test_photo_too_large_is_rejected(sent, ai_stub, monkeypatch):
+    """Фото > 10 МБ отклоняется без скачивания."""
+
+    async def _never_download(file_id):
+        raise RuntimeError("should not reach download")
+
+    monkeypatch.setattr(bot, "download_telegram_file", _never_download)
+
+    asyncio.run(
+        bot.process_update(
+            _photo_message("проверка", photo_sizes=(20, 80, 15_000_000))
+        )
+    )
+
+    assert "слишком большая" in sent[0]["text"]
+    assert ai_stub == {}
+
+
+def test_photo_download_failure_sent_to_user(sent, monkeypatch):
+    async def _broken(file_id):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(bot, "download_telegram_file", _broken)
+
+    asyncio.run(bot.process_update(_photo_message("что на фото?")))
+
+    assert "не удалось скачать" in sent[0]["text"].lower()
+
+
+def test_answer_and_reply_handles_ai_error(sent, monkeypatch):
+    """Когда ask_ai бросает AIError, пользователь получает сообщение об ошибке."""
+
+    async def _failing_ask(**_kwargs):
+        raise ai.AIError("лимит исчерпан")
+
+    monkeypatch.setattr(bot, "ask_ai", _failing_ask)
+
+    asyncio.run(
+        bot.answer_and_reply(100, 100, "вопрос", "вопрос", reply_to=42)
+    )
+
+    assert "лимит" in sent[0]["text"]
+    assert sent[0]["reply_to"] == 42
+    assert memory.get_history(100) == []
+
+
+def test_answer_and_reply_handles_generic_error(sent, monkeypatch):
+    """Когда ask_ai бросает RuntimeError, пользователь получает сообщение."""
+
+    async def _failing_ask(**_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(bot, "ask_ai", _failing_ask)
+
+    asyncio.run(
+        bot.answer_and_reply(100, 100, "вопрос", "вопрос")
+    )
+
+    assert "ошибка" in sent[0]["text"].lower()
+    assert memory.get_history(100) == []
+
+
+def test_split_text_empty_string():
+    assert bot._split_text("", 100) == [""]
+
+
+def test_split_text_single_paragraph_no_break():
+    text = "a" * 50
+    chunks = bot._split_text(text, 100)
+    assert chunks == [text]

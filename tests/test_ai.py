@@ -262,3 +262,117 @@ def test_ask_ai_retries_rate_limited_request_before_failing(fake_gemini, monkeyp
 
     assert result == "со второй попытки"
     assert len(fake.calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# _status_code (дополнительно)
+# ---------------------------------------------------------------------------
+
+
+def test_status_code_reads_response_attribute():
+    class FakeResp:
+        status_code = 500
+
+    class FakeExc(Exception):
+        code = None
+        response = FakeResp()
+
+    assert ai._status_code(FakeExc()) == 500
+
+
+def test_status_code_reads_code_attribute():
+    class FakeExc(Exception):
+        code = 400
+
+    assert ai._status_code(FakeExc()) == 400
+
+
+# ---------------------------------------------------------------------------
+# ask_ai: ошибки с конкретными кодами
+# ---------------------------------------------------------------------------
+
+
+def test_ask_ai_404_recommends_model_check(fake_gemini, one_retry):
+    fake_gemini({ai.PRIMARY_MODEL: _api_error(404), ai.FALLBACK_MODEL: _api_error(404)})
+
+    with pytest.raises(ai.AIError) as excinfo:
+        asyncio.run(ai.ask_ai("привет", []))
+
+    assert "недоступна" in str(excinfo.value).lower()
+    assert "GEMINI_MODEL" in str(excinfo.value)
+
+
+def test_ask_ai_400_does_not_retry_the_same_model(fake_gemini, monkeypatch):
+    """400 — ошибка запроса, крутить её 3 раза бессмысленно."""
+    monkeypatch.setattr(ai, "MAX_RETRIES", 3)
+    fake = fake_gemini({
+        ai.PRIMARY_MODEL: _api_error(400),
+        ai.FALLBACK_MODEL: _api_error(400),
+    })
+
+    with pytest.raises(ai.AIError):
+        asyncio.run(ai.ask_ai("привет", []))
+
+    assert len(fake.calls) == 2  # по одному вызову на каждую модель
+
+
+def test_ask_ai_403_reports_bad_key(fake_gemini, one_retry):
+    fake_gemini({ai.PRIMARY_MODEL: _api_error(403), ai.FALLBACK_MODEL: _api_error(403)})
+
+    with pytest.raises(ai.AIError) as excinfo:
+        asyncio.run(ai.ask_ai("привет", []))
+
+    assert "GEMINI_API_KEY" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# _check_models_once
+# ---------------------------------------------------------------------------
+
+
+def test_check_models_once_runs_only_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ai, "validate_models", lambda: calls.append(1))
+    monkeypatch.setattr(ai, "_models_checked", False)
+
+    asyncio.run(ai._check_models_once())
+    asyncio.run(ai._check_models_once())
+    asyncio.run(ai._check_models_once())
+
+    assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# list_available_models
+# ---------------------------------------------------------------------------
+
+
+def test_list_available_models_strips_models_prefix(fake_gemini):
+    fake_gemini(available=["gemini-2.5-flash", "gemini-3.5-flash"])
+
+    assert ai.list_available_models() == ["gemini-2.5-flash", "gemini-3.5-flash"]
+
+
+def test_list_available_models_empty_on_error(monkeypatch):
+    class BrokenModels:
+        def list(self):
+            raise RuntimeError("нет сети")
+
+    monkeypatch.setattr(ai, "client", type("C", (), {"models": BrokenModels()})())
+
+    assert ai.list_available_models() == []
+
+
+# ---------------------------------------------------------------------------
+# _generate_sync edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_generate_sync_empty_text_raises_AIError(fake_gemini):
+    """Когда модель вернула None.text, это ошибка."""
+    fake_gemini({"m": ""})
+
+    with pytest.raises(ai.AIError) as excinfo:
+        ai._generate_sync("m", [])
+
+    assert "finish_reason" in str(excinfo.value).lower() or "не вернула текст" in str(excinfo.value).lower()
