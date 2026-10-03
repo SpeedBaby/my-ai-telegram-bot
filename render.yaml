@@ -12,8 +12,7 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-      - key: WEBHOOK_SECRET
-        generateValue: true    # Render сам придумает случайный секрет
+      # WEBHOOK_SECRET не задаём: приложение сгенерирует безопасный само.
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
       - key: GEMINI_FALLBACK_MODEL

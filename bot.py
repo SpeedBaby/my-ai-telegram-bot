@@ -8,6 +8,7 @@ Run locally (no webhook):   python bot.py     (needs no PUBLIC_URL — long poll
 import asyncio
 import logging
 import os
+import re
 import secrets
 import sys
 from contextlib import asynccontextmanager
@@ -68,15 +69,37 @@ def _resolve_public_url() -> str:
 
 
 PUBLIC_URL = _resolve_public_url()
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "").strip()
-if not WEBHOOK_SECRET or WEBHOOK_SECRET == "change-me":
-    # На Render секрет можно не задавать (в render.yaml стоит generateValue),
-    # а для локального запуска он не нужен вовсе. На всякий случай генерируем.
+
+# Telegram разрешает в secret_token только A-Z, a-z, 0-9, _ и -.
+# Render (generateValue) может добавить +, /, = — их нужно убрать, иначе
+# setWebhook вернёт "secret token contains illegal characters".
+_SECRET_SAFE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _normalize_webhook_secret(raw: str) -> str:
+    """Привести WEBHOOK_SECRET к виду, который принимает Telegram."""
+    cleaned = _SECRET_SAFE.sub("", raw or "")[:256]
+    # Если после чистки осталось мало символов — секрет слабый, берём свой.
+    if len(cleaned) < 16:
+        return secrets.token_urlsafe(32)
+    return cleaned
+
+
+_raw_secret = os.environ.get("WEBHOOK_SECRET", "").strip()
+if not _raw_secret or _raw_secret == "change-me":
+    # Секрет не задан: для локального запуска он не нужен, на Render — можно
+    # не задавать. Генерируем свой (стабильный в пределах процесса).
     WEBHOOK_SECRET = secrets.token_urlsafe(32)
     log.warning(
-        "WEBHOOK_SECRET не задан — сгенерирован случайный на этот запуск. "
-        "Для стабильной работы задай его в переменных окружения."
+        "WEBHOOK_SECRET не задан — сгенерирован случайный на этот запуск."
     )
+else:
+    WEBHOOK_SECRET = _normalize_webhook_secret(_raw_secret)
+    if WEBHOOK_SECRET != _raw_secret:
+        log.warning(
+            "WEBHOOK_SECRET содержал символы, недопустимые для Telegram "
+            "(разрешены только A-Z, a-z, 0-9, _ и -) — они удалены."
+        )
 WEBHOOK_PATH = f"/telegram/{WEBHOOK_SECRET}"
 
 # Optional: comma-separated Telegram user IDs. Empty = bot is open to everyone.
@@ -112,12 +135,23 @@ def spawn(coro) -> asyncio.Task:
     return task
 
 
+class TelegramError(RuntimeError):
+    """Ошибка от Telegram API с разобранным кодом."""
+
+    def __init__(self, method: str, data: dict):
+        self.method = method
+        self.data = data
+        self.error_code = data.get("error_code")
+        self.description = data.get("description", "")
+        super().__init__(f"Telegram {method} failed: {data}")
+
+
 async def tg(method: str, **payload):
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(f"{TG_API}/{method}", json=payload)
         data = r.json()
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram {method} failed: {data}")
+            raise TelegramError(method, data)
         return data["result"]
 
 
@@ -386,6 +420,17 @@ async def set_webhook():
 async def _configure_webhook() -> None:
     try:
         await set_webhook()
+    except TelegramError as exc:
+        if exc.error_code in (401, 404):
+            log.error(
+                "Telegram отклонил BOT_TOKEN (код %s: %s). "
+                "Перевыпусти токен у @BotFather (/mybots -> API Token -> Revoke) "
+                "и обнови переменную BOT_TOKEN в Render, затем сделай Manual Deploy.",
+                exc.error_code,
+                exc.description,
+            )
+        else:
+            log.exception("Could not configure Telegram webhook")
     except Exception:
         log.exception("Could not configure Telegram webhook")
 

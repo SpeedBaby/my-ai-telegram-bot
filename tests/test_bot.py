@@ -4,6 +4,8 @@
 """
 
 import asyncio
+import logging
+import re
 
 import pytest
 
@@ -451,3 +453,73 @@ def test_public_url_empty_when_nothing_set(monkeypatch):
     monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
 
     assert bot._resolve_public_url() == ""
+
+
+# ---------------------------------------------------------------------------
+# _normalize_webhook_secret (Telegram разрешает только A-Za-z0-9_-)
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_webhook_secret_keeps_valid_value():
+    valid = "abcDEF123_-abcDEF123_-"
+    assert bot._normalize_webhook_secret(valid) == valid
+
+
+def test_normalize_webhook_secret_removes_illegal_chars():
+    # base64-подобный секрет с +, /, = недопустим для Telegram.
+    result = bot._normalize_webhook_secret("AbC+def/ghi=jklMnOpQrSt")
+
+    assert "+" not in result and "/" not in result and "=" not in result
+    assert result == "AbCdefghijklMnOpQrSt"
+
+
+def test_normalize_webhook_secret_generates_when_too_short():
+    # после чистки остаётся мало символов -> берём сгенерированный
+    result = bot._normalize_webhook_secret("++//==")
+
+    assert len(result) >= 16
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", result)
+
+
+def test_normalize_webhook_secret_caps_length_at_256():
+    assert len(bot._normalize_webhook_secret("a" * 500)) == 256
+
+
+# ---------------------------------------------------------------------------
+# Ошибки Telegram (неверный токен)
+# ---------------------------------------------------------------------------
+
+
+def test_telegram_error_keeps_code_and_is_runtime_error():
+    err = bot.TelegramError(
+        "setWebhook", {"ok": False, "error_code": 401, "description": "Unauthorized"}
+    )
+
+    assert err.error_code == 401
+    assert err.description == "Unauthorized"
+    # send_message ловит именно RuntimeError, чтобы переслать без Markdown.
+    assert isinstance(err, RuntimeError)
+
+
+def test_configure_webhook_reports_bad_token(monkeypatch, caplog):
+    async def fake_set_webhook():
+        raise bot.TelegramError(
+            "setWebhook", {"ok": False, "error_code": 401, "description": "Unauthorized"}
+        )
+
+    monkeypatch.setattr(bot, "set_webhook", fake_set_webhook)
+
+    with caplog.at_level(logging.ERROR, logger="ai-bot"):
+        asyncio.run(bot._configure_webhook())
+
+    assert "BOT_TOKEN" in caplog.text
+
+
+def test_configure_webhook_does_not_crash_on_unknown_error(monkeypatch, caplog):
+    async def broken_set_webhook():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(bot, "set_webhook", broken_set_webhook)
+
+    with caplog.at_level(logging.ERROR, logger="ai-bot"):
+        asyncio.run(bot._configure_webhook())  # не должно бросить исключение
