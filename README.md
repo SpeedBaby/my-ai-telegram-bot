@@ -34,7 +34,11 @@ python -m venv .venv
 pip install -r requirements.txt
 
 4. Создай `.env` на основе `.env.example` и заполни BOT_TOKEN и GEMINI_API_KEY.
-5. Если `PUBLIC_URL` не задан, бот сам возьмёт **long polling** — HTTPS-туннель не нужен. Запусти:
+5. Проверь настройки (реально обращается к Telegram и Gemini):
+
+python check_setup.py
+
+6. Если `PUBLIC_URL` не задан, бот сам возьмёт **long polling** — HTTPS-туннель не нужен. Запусти:
 
 python bot.py
 
@@ -62,11 +66,12 @@ https://my-ai-telegram-bot.onrender.com
 BOT_TOKEN = токен от BotFather
 GEMINI_API_KEY = ключ Gemini API
 PUBLIC_URL = URL Render без завершающего /
-WEBHOOK_SECRET = длинная случайная строка
-GEMINI_MODEL = gemini-3.8-flash
-GEMINI_FALLBACK_MODEL = gemini-3.5-flash-lite
+WEBHOOK_SECRET = длинная случайная строка (без неё webhook не включается)
+GEMINI_MODEL = gemini-2.5-flash
+GEMINI_FALLBACK_MODEL = gemini-2.5-flash-lite
 ALLOWED_USERS = пусто (всем) или ID через запятую
 MAX_HISTORY_MESSAGES = 20
+AI_MAX_RETRIES = 3
 
 ## Что делать при ошибках
 
@@ -78,15 +83,15 @@ MAX_HISTORY_MESSAGES = 20
 
 ## Тесты
 
-В проекте есть офлайн-тесты (без реальных запросов к Telegram и Gemini):
+В проекте есть 77 офлайн-тестов (без реальных запросов к Telegram и Gemini):
 
 ```
 pip install -r requirements.txt -r requirements-dev.txt
 pytest -q
 ```
 
-Тесты покрывают: команды бота, whitelist, разбор фото, ошибки AI, память диалога,
-поведение при лимитах (429) и подбор доступной модели.
+Тесты покрывают: команды бота, whitelist, разбор фото и лимит размера,
+ошибки AI, память диалога, поведение при 400/401/403/404/429 и подбор доступной модели.
 
 ## Безопасность
 
@@ -95,4 +100,6 @@ pytest -q
 - GEMINI_API_KEY
 - WEBHOOK_SECRET
 
-Если токен Telegram утёк, перевыпусти его через BotFather.
+`.env` уже добавлен в `.gitignore` — в git он не попадёт.
+Если токен Telegram утёк (переслал в чат, попал на скриншот, был в файле) —
+отправь BotFather `/revoke` и получи новый.

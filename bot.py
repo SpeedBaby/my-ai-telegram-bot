@@ -28,7 +28,12 @@ logging.basicConfig(
 )
 log = logging.getLogger("ai-bot")
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN не задан. Добавь его в файл .env "
+        "(токен выдаёт @BotFather командой /newbot или /token)."
+    )
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me")
 WEBHOOK_PATH = f"/telegram/{WEBHOOK_SECRET}"

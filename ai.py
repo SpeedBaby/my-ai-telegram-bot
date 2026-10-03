@@ -18,7 +18,12 @@ from google.genai import types
 
 log = logging.getLogger("ai")
 
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+if not GEMINI_API_KEY:
+    raise RuntimeError(
+        "GEMINI_API_KEY не задан. Добавь его в файл .env "
+        "(ключ бесплатно выдаётся на https://aistudio.google.com/apikey)."
+    )
 
 # Primary model and a fallback for when the primary one hits its free quota.
 # Both are multimodal (text + images). Change via env vars if Google renames them.
