@@ -37,6 +37,14 @@ def _no_waits(monkeypatch):
     monkeypatch.setattr(ai.asyncio, "sleep", instant)
 
 
+@pytest.fixture(autouse=True)
+def _reset_model_state():
+    """_remember_working_model меняет PRIMARY/FALLBACK напрямую — откатываем."""
+    original_primary, original_fallback = ai.PRIMARY_MODEL, ai.FALLBACK_MODEL
+    yield
+    ai.PRIMARY_MODEL, ai.FALLBACK_MODEL = original_primary, original_fallback
+
+
 # ---------------------------------------------------------------------------
 # _build_contents
 # ---------------------------------------------------------------------------
@@ -408,6 +416,31 @@ def test_ask_ai_switches_to_available_model_on_404(fake_gemini, one_retry):
 
     assert result == "ответ от рабочей модели"
     assert "gemini-2.0-flash" in {call["model"] for call in fake.calls}
+
+
+# ---------------------------------------------------------------------------
+# _remember_working_model (не перебирать 404 на каждом запросе)
+# ---------------------------------------------------------------------------
+
+
+def test_remember_working_model_switches_primary(monkeypatch):
+    monkeypatch.setattr(ai, "PRIMARY_MODEL", "gemini-2.5-flash")
+    monkeypatch.setattr(ai, "FALLBACK_MODEL", "gemini-2.5-flash-lite")
+
+    ai._remember_working_model("gemini-3.8-flash")
+
+    assert ai.PRIMARY_MODEL == "gemini-3.8-flash"
+    assert ai.FALLBACK_MODEL == "gemini-2.5-flash"
+
+
+def test_remember_working_model_keeps_current_when_same(monkeypatch):
+    monkeypatch.setattr(ai, "PRIMARY_MODEL", "gemini-3.8-flash")
+    monkeypatch.setattr(ai, "FALLBACK_MODEL", "gemini-3.5-flash-lite")
+
+    ai._remember_working_model("gemini-3.8-flash")
+
+    assert ai.PRIMARY_MODEL == "gemini-3.8-flash"
+    assert ai.FALLBACK_MODEL == "gemini-3.5-flash-lite"
 
 
 def test_ask_ai_400_does_not_retry_the_same_model(fake_gemini, monkeypatch):

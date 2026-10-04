@@ -28,8 +28,11 @@ if not GEMINI_API_KEY:
 # Primary model and a fallback for when the primary one hits its free quota.
 # Both are multimodal (text + images). Change via env vars if Google renames them.
 # Пустая переменная окружения не должна ломать запуск — берём значение по умолчанию.
-PRIMARY_MODEL = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
-FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL") or "gemini-2.5-flash-lite"
+# Google закрывает старые модели для новых ключей и подсказывает замену в тексте
+# ошибки 404 (например, gemini-2.5-flash -> gemini-3.8-flash), поэтому дефолты
+# должны указывать на актуальные модели.
+PRIMARY_MODEL = os.environ.get("GEMINI_MODEL") or "gemini-3.8-flash"
+FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL") or "gemini-3.5-flash-lite"
 
 MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "20"))
 MAX_RETRIES = int(os.environ.get("AI_MAX_RETRIES", "3"))
@@ -146,11 +149,21 @@ def _is_region_blocked(exc: Exception) -> bool:
 # Google ограничивает доступ к 2.5-моделям для новых ключей, поэтому держим
 # в конце проверенные gemini-2.0-*.
 _PREFERRED = (
+    # Актуальные модели для новых ключей (по подсказкам самой Google в 404).
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite",
+    # Более старые (могут быть недоступны новым ключам, но вдруг).
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
-    "gemini-2.5-pro",
     # Алиасы Google, которые указывают на актуальную модель семейства.
     "gemini-flash-latest",
     "gemini-flash-lite-latest",
@@ -158,7 +171,7 @@ _PREFERRED = (
 )
 
 # Модели, которые не умеют обычный текстовый ответ (озвучка, картинки,
-# эмбеддинги и т.п.) — их нельзя предлагать как замену чат-модели.
+# транскрипция, эмбеддинги и т.п.) — их нельзя предлагать как замену чат-модели.
 _NON_TEXT_MARKERS = (
     "tts",
     "audio",
@@ -175,6 +188,7 @@ _NON_TEXT_MARKERS = (
     "vision",
     "robotics",
     "learnlm",
+    "transcribe",
 )
 
 
@@ -267,6 +281,21 @@ def validate_models() -> None:
 _models_checked = False
 
 
+def _remember_working_model(model: str) -> None:
+    """Запомнить модель, которая реально ответила.
+
+    Иначе каждый запрос заново перебирает недоступные модели (лишние 404 и
+    задержка в 1–2 секунды на каждый ответ).
+    """
+    global PRIMARY_MODEL, FALLBACK_MODEL
+    if model == PRIMARY_MODEL:
+        return
+    log.info("Remembering working model %s (was %s)", model, PRIMARY_MODEL)
+    if FALLBACK_MODEL and FALLBACK_MODEL != model:
+        FALLBACK_MODEL = PRIMARY_MODEL
+    PRIMARY_MODEL = model
+
+
 async def _check_models_once() -> None:
     """Validate model names once per process (on the first request after startup)."""
     global _models_checked
@@ -315,7 +344,9 @@ async def ask_ai(
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 # google-genai call is blocking; keep FastAPI's event loop free.
-                return await asyncio.to_thread(_generate_sync, model, contents)
+                answer = await asyncio.to_thread(_generate_sync, model, contents)
+                _remember_working_model(model)
+                return answer
             except AIError:
                 raise
             except Exception as exc:  # noqa: BLE001

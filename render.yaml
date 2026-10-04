@@ -1,4 +1,4 @@
-services:
+﻿services:
   - type: web
     name: my-ai-telegram-bot
     runtime: python
@@ -12,11 +12,11 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-      # WEBHOOK_SECRET не задаём: приложение сгенерирует безопасный само.
+      # WEBHOOK_SECRET РЅРµ Р·Р°РґР°С‘Рј: РїСЂРёР»РѕР¶РµРЅРёРµ СЃРіРµРЅРµСЂРёСЂСѓРµС‚ Р±РµР·РѕРїР°СЃРЅС‹Р№ СЃР°РјРѕ.
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.8-flash
       - key: GEMINI_FALLBACK_MODEL
-        value: gemini-2.0-flash
+        value: gemini-3.5-flash-lite
       - key: ALLOWED_USERS
         value: ""
       - key: MAX_HISTORY_MESSAGES

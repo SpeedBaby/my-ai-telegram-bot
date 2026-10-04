@@ -138,9 +138,12 @@ async def _try_generate(client, types, model: str) -> tuple[str, str | None]:
 _NON_TEXT_MARKERS = (
     "tts", "audio", "image", "embedding", "embed", "aqa",
     "computer-use", "deep-research", "antigravity", "veo", "imagen",
-    "live", "vision", "robotics", "learnlm",
+    "live", "vision", "robotics", "learnlm", "transcribe",
 )
 _GOOD_MODELS = {
+    "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite",
+    "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview", "gemini-3.1-flash-lite",
     "gemini-2.0-flash", "gemini-2.5-flash",
     "gemini-2.0-flash-lite", "gemini-2.5-flash-lite",
     "gemini-2.5-pro",

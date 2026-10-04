@@ -7,7 +7,7 @@
 - ✅ **Python 3.12** установлен (`C:\Users\nikit\AppData\Local\Programs\Python\Python312`)
 - ✅ **Git** установлен
 - ✅ **Виртуальное окружение** `.venv` создано, все зависимости стоят
-- ✅ **111 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
+- ✅ **113 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
 - ✅ **Git-репозиторий** инициализирован, ветка `main`, 4 коммита, секретов внутри нет
 - ✅ Файл `.env` создан
 
@@ -115,8 +115,8 @@ BOT_TOKEN=новый_токен_от_BotFather
 GEMINI_API_KEY=ключ_из_Google_AI_Studio
 PUBLIC_URL=                         ← пока оставь пустым!
 WEBHOOK_SECRET=придумай_длинную_случайную_строку
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_FALLBACK_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_FALLBACK_MODEL=gemini-3.5-flash-lite
 ```
 
 > `.env` уже в `.gitignore` — в GitHub он не попадёт.
@@ -132,8 +132,9 @@ Gemini и говорит, что именно не так:
 
 Что ты увидишь на своём ПК:
 
-- **Gemini** — должен написать `[OK] Gemini gemini-2.5-flash: 'ок'`.
-  Если `[FAIL]` — проверь ключ.
+- **Gemini** — на твоём компьютере будет `[FAIL]` с текстом
+  `User location is not supported` — это блокировка Google по региону, а не
+  проблема ключа. Проверять Gemini нужно **на Render** (см. раздел 15.2).
 - **Telegram** — напишет `[FAIL] Нет соединения с Telegram`. **Это ожидаемо**:
   твой провайдер блокирует Telegram. На работу бота на Render это не влияет.
 
@@ -265,7 +266,7 @@ ALLOWED_USERS = 123456789
 | --- | --- |
 | `KeyError: 'BOT_TOKEN'` | Проверь, что BOT_TOKEN и GEMINI_API_KEY заданы в Render |
 | `Нет соединения с Telegram (ConnectTimeout)` | Telegram блокирует провайдер — см. раздел ниже |
-| `404 NOT_FOUND` от Gemini | Модель недоступна ключу. Бот сам подберёт рабочую; если не вышло — смени `GEMINI_MODEL` на `gemini-2.0-flash` |
+| `404 NOT_FOUND` от Gemini | Google закрыл модель для новых ключей; в тексте ошибки есть подсказка (`use models/gemini-3.8-flash`). Бот сам перейдёт на рабочую и запомнит её. Если нет — поставь `GEMINI_MODEL=gemini-3.8-flash` |
 | Модель есть в списке, но даёт `404` | Google ограничивает доступ к `gemini-2.5-*` для новых ключей. Запусти `check_setup.py` — он найдёт рабочую модель |
 | `response modalities (TEXT) is not supported` | Автоподбор брал модель без текста (TTS/аудио) — уже исправлено в коде |
 | `User location is not supported for the API use` | Google блокирует Gemini API в твоём регионе — см. раздел **15.2** |
@@ -344,7 +345,7 @@ Google ограничивает Gemini API по **геолокации запр�
 .venv\Scripts\python.exe check_setup.py
 ```
 
-**Тесты** — 111 офлайн-тестов, сеть не нужна:
+**Тесты** — 113 офлайн-тестов, сеть не нужна:
 
 ```
 .venv\Scripts\python.exe -m pytest -q
