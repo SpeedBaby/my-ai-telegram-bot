@@ -7,7 +7,7 @@
 - ✅ **Python 3.12** установлен (`C:\Users\nikit\AppData\Local\Programs\Python\Python312`)
 - ✅ **Git** установлен
 - ✅ **Виртуальное окружение** `.venv` создано, все зависимости стоят
-- ✅ **95 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
+- ✅ **107 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
 - ✅ **Git-репозиторий** инициализирован, ветка `main`, 4 коммита, секретов внутри нет
 - ✅ Файл `.env` создан
 
@@ -266,6 +266,8 @@ ALLOWED_USERS = 123456789
 | `KeyError: 'BOT_TOKEN'` | Проверь, что BOT_TOKEN и GEMINI_API_KEY заданы в Render |
 | `Нет соединения с Telegram (ConnectTimeout)` | Telegram блокирует провайдер — см. раздел ниже |
 | `404 NOT_FOUND` от Gemini | Модель недоступна ключу. Бот сам подберёт рабочую; если не вышло — смени `GEMINI_MODEL` на `gemini-2.0-flash` |
+| Модель есть в списке, но даёт `404` | Google ограничивает доступ к `gemini-2.5-*` для новых ключей. Запусти `check_setup.py` — он найдёт рабочую модель |
+| `response modalities (TEXT) is not supported` | Автоподбор брал модель без текста (TTS/аудио) — уже исправлено в коде |
 | `429 RESOURCE_EXHAUSTED` | Исчерпан бесплатный лимит. Подожди минуту — бот сам попробует резервную модель |
 | Бот отвечает 2–4 раза на одно сообщение | Обычно из-за «сна» Render. Бот теперь пропускает повторные доставки; передеплой, чтобы обновилось |
 | `getMe: Unauthorized` | Неверный BOT_TOKEN |
@@ -310,7 +312,7 @@ python check_setup.py
 .venv\Scripts\python.exe check_setup.py
 ```
 
-**Тесты** — 95 офлайн-тестов, сеть не нужна:
+**Тесты** — 107 офлайн-тестов, сеть не нужна:
 
 ```
 .venv\Scripts\python.exe -m pytest -q

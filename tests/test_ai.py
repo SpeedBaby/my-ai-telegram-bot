@@ -145,6 +145,49 @@ def test_pick_available_returns_none_when_everything_tried():
     assert ai._pick_available(["gemini-2.5-flash"], tried={"gemini-2.5-flash"}) is None
 
 
+# ---------------------------------------------------------------------------
+# _is_text_model: отсеиваем озвучку/картинки (реальный баг с ...-tts)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "gemini-2.5-flash-preview-tts",
+        "gemini-2.5-flash-native-audio-preview-09-2025",
+        "gemini-2.5-flash-image",
+        "gemini-embedding-001",
+        "aqa",
+        "deep-research-pro-preview-12-2025",
+        "antigravity-preview-latest",
+    ],
+)
+def test_is_text_model_rejects_non_text_models(name):
+    assert ai._is_text_model(name) is False
+
+
+@pytest.mark.parametrize(
+    "name", ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "some-chat-model"]
+)
+def test_is_text_model_accepts_chat_models(name):
+    assert ai._is_text_model(name) is True
+
+
+def test_pick_available_never_returns_a_tts_model():
+    """Повтор реального сбоя: ключ отдаёт 404 на flash, а автоподбор брал ...-tts."""
+    available = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash-preview-tts",
+        "gemini-2.5-flash-image",
+        "gemini-2.5-pro",
+    ]
+
+    picked = ai._pick_available(available, tried={"gemini-2.5-flash", "gemini-2.5-flash-lite"})
+
+    assert picked == "gemini-2.5-pro"
+
+
 def test_validate_models_switches_primary_when_name_is_retired(monkeypatch):
     monkeypatch.setattr(ai, "PRIMARY_MODEL", "gemini-3.8-flash")
     monkeypatch.setattr(ai, "FALLBACK_MODEL", "gemini-3.5-flash-lite")

@@ -116,6 +116,43 @@ async def check_telegram(token: str) -> bool:
     return True
 
 
+async def _try_generate(client, types, model: str) -> str | None:
+    """Одна проверка модели: вернуть текст ответа или None при ошибке."""
+    try:
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents="Ответь ровно одно слово: ок",
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                # У моделей 2.5 «размышления» тоже тратят этот лимит,
+                # поэтому берём с запасом, чтобы не получить пустой ответ.
+                max_output_tokens=256,
+            ),
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    return (response.text or "").strip()
+
+
+# Модели, которые не умеют обычный текстовый ответ (озвучка, картинки и т.п.).
+_NON_TEXT_MARKERS = (
+    "tts", "audio", "image", "embedding", "embed", "aqa",
+    "computer-use", "deep-research", "antigravity", "veo", "imagen",
+    "live", "vision", "robotics", "learnlm",
+)
+_GOOD_MODELS = {
+    "gemini-2.0-flash", "gemini-2.5-flash",
+    "gemini-2.0-flash-lite", "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
+    "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest",
+}
+
+
+def _looks_like_text_model(name: str) -> bool:
+    lower = name.lower()
+    return not any(marker in lower for marker in _NON_TEXT_MARKERS)
+
+
 async def check_gemini(key: str) -> bool:
     model = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
     try:
@@ -139,8 +176,11 @@ async def check_gemini(key: str) -> bool:
             if name:
                 available.append(name)
         if available:
-            print(f"[INFO] Доступно моделей: {len(available)}. Примеры: "
-                  f"{', '.join(sorted(available)[:10])}")
+            text_models = sorted(m for m in available if _looks_like_text_model(m))
+            print(f"[INFO] Доступно моделей: {len(available)}, "
+                  f"из них текстовых: {len(text_models)}.")
+            if text_models:
+                print(f"       Текстовые: {', '.join(text_models)}")
             if model not in available:
                 print(f"[WARN] Заданная GEMINI_MODEL={model!r} в списке отсутствует.")
         else:
@@ -148,38 +188,27 @@ async def check_gemini(key: str) -> bool:
     except Exception as exc:  # noqa: BLE001
         print(f"[WARN] Не удалось получить список моделей: {type(exc).__name__}: {exc}")
 
-    try:
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents="Ответь ровно одно слово: ок",
-            config=types.GenerateContentConfig(
-                temperature=0.0,
-                # У моделей 2.5 «размышления» тоже тратят этот лимит,
-                # поэтому берём с запасом, чтобы не получить пустой ответ.
-                max_output_tokens=256,
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001
-        text = str(exc)
-        print(f"[FAIL] Gemini, модель {model}: {type(exc).__name__}: {text[:400]}")
-        if "404" in text or "not found" in text.lower():
-            print("       -> модель недоступна ключу. Проверь GEMINI_MODEL.")
-        elif "400" in text or "API key" in text:
-            print("       -> проверь GEMINI_API_KEY: https://aistudio.google.com/apikey")
-        # Подскажем модель, которая точно доступна.
-        for candidate in ("gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.0-flash-lite"):
-            if candidate in available and candidate != model:
-                print(f"       -> попробуй GEMINI_MODEL={candidate}")
-                break
-        return False
-
-    answer = (response.text or "").strip()
+    answer = await _try_generate(client, types, model)
     if answer:
         print(f"[OK]   Gemini {model}: {answer[:60]!r}")
         return True
 
-    print(f"[WARN] Gemini вернул пустой текст (модель {model} жива, но ответ пустой)")
-    return True
+    print(f"[FAIL] Модель {model} не ответила. Пробую подобрать рабочую...")
+    # Перебираем текстовые модели и ищем ту, что реально работает.
+    candidates = [m for m in available if _looks_like_text_model(m) and m != model]
+    # Сначала известные хорошие, потом остальные.
+    candidates.sort(key=lambda n: (n not in _GOOD_MODELS, n))
+    for candidate in candidates[:6]:
+        print(f"       ... пробую {candidate}")
+        text = await _try_generate(client, types, candidate)
+        if text:
+            print(f"[OK]   Рабочая модель найдена: {candidate}")
+            print(f"       -> поставь GEMINI_MODEL={candidate} (и в Render тоже)")
+            return True
+
+    print("       -> ни одна текстовая модель не ответила. "
+          "Проверь ключ и регион: https://ai.google.dev/gemini-api/docs/available-regions")
+    return False
 
 
 async def main() -> int:

@@ -34,6 +34,9 @@ FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL") or "gemini-2.5-flash-li
 MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "20"))
 MAX_RETRIES = int(os.environ.get("AI_MAX_RETRIES", "3"))
 
+# Сколько разных моделей пробовать, если предыдущие недоступны (404).
+_MAX_MODEL_ATTEMPTS = 6
+
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 SYSTEM_PROMPT = """
@@ -141,7 +144,38 @@ _PREFERRED = (
     "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
+    "gemini-2.5-pro",
+    # Алиасы Google, которые указывают на актуальную модель семейства.
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    "gemini-pro-latest",
 )
+
+# Модели, которые не умеют обычный текстовый ответ (озвучка, картинки,
+# эмбеддинги и т.п.) — их нельзя предлагать как замену чат-модели.
+_NON_TEXT_MARKERS = (
+    "tts",
+    "audio",
+    "image",
+    "embedding",
+    "embed",
+    "aqa",
+    "computer-use",
+    "deep-research",
+    "antigravity",
+    "veo",
+    "imagen",
+    "live",
+    "vision",
+    "robotics",
+    "learnlm",
+)
+
+
+def _is_text_model(name: str) -> bool:
+    """Похоже ли имя на обычную чат-модель, которая вернёт текст."""
+    lower = name.lower()
+    return not any(marker in lower for marker in _NON_TEXT_MARKERS)
 
 
 def list_available_models() -> list[str]:
@@ -162,31 +196,31 @@ def list_available_models() -> list[str]:
 
 
 def _pick_alternative(available: list[str], exclude: str) -> str | None:
-    """Best available model that is not `exclude` (preferred list first)."""
+    """Best available text model that is not `exclude` (preferred list first)."""
+    text_models = [m for m in available if _is_text_model(m) and m != exclude]
     for candidate in _PREFERRED:
-        if candidate in available and candidate != exclude:
+        if candidate in text_models:
             return candidate
     # Nothing from the preferred list: take any flash model, then anything else.
-    for model in available:
-        if "flash" in model and model != exclude:
+    for model in text_models:
+        if "flash" in model:
             return model
-    for model in available:
-        if model != exclude:
-            return model
+    for model in text_models:
+        return model
     return None
 
 
 def _pick_available(available: list[str], tried: set[str]) -> str | None:
-    """Лучшая доступная модель, которую мы ещё не пробовали."""
+    """Лучшая доступная текстовая модель, которую мы ещё не пробовали."""
+    candidates = [m for m in available if _is_text_model(m) and m not in tried]
     for candidate in _PREFERRED:
-        if candidate in available and candidate not in tried:
+        if candidate in candidates:
             return candidate
-    for model in available:
-        if "flash" in model and model not in tried:
+    for model in candidates:
+        if "flash" in model:
             return model
-    for model in available:
-        if model not in tried:
-            return model
+    for model in candidates:
+        return model
     return None
 
 
@@ -204,7 +238,7 @@ def validate_models() -> None:
                  PRIMARY_MODEL, FALLBACK_MODEL or "—")
         return
 
-    log.info("Gemini models available for this key: %s", ", ".join(sorted(available)[:15]))
+    log.info("Gemini models available for this key: %s", ", ".join(sorted(available)[:40]))
 
     if PRIMARY_MODEL not in available:
         new_primary = _pick_alternative(available, exclude="")
@@ -261,6 +295,10 @@ async def ask_ai(
 
     index = 0
     while index < len(models_to_try):
+        # Не перебираем бесконечно: каждая 404 — это лишняя задержка ответа.
+        if len(tried) >= _MAX_MODEL_ATTEMPTS:
+            log.warning("Gave up after trying %d models", len(tried))
+            break
         model = models_to_try[index]
         index += 1
         if model in tried:
@@ -285,8 +323,8 @@ async def ask_ai(
                     await asyncio.sleep(wait)
                     continue
                 if _status_code(exc) == 404:
-                    # Unknown/retired model: find another one that really works.
-                    log.error("Model %s is not available for this key", model)
+                    # Unknown/retired model, or Google restricts it for this key.
+                    log.error("Model %s returned 404: %s", model, exc)
                     available = await asyncio.to_thread(list_available_models)
                     alternative = _pick_available(available, tried)
                     if alternative and alternative not in models_to_try:

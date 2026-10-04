@@ -86,7 +86,7 @@ AI_MAX_RETRIES = 3
 
 ## Тесты
 
-В проекте есть 95 офлайн-тестов (без реальных запросов к Telegram и Gemini):
+В проекте есть 107 офлайн-тестов (без реальных запросов к Telegram и Gemini):
 
 ```
 pip install -r requirements.txt -r requirements-dev.txt
