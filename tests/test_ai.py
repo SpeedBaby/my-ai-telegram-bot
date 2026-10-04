@@ -1,6 +1,7 @@
 """Тесты слоя AI: сборка контекста, определение лимитов, выбор модели, ретраи."""
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from google.genai import errors as genai_errors
@@ -142,6 +143,89 @@ def test_ask_ai_reports_region_block(fake_gemini, one_retry):
         asyncio.run(ai.ask_ai("привет", []))
 
     assert "регион" in str(excinfo.value).lower()
+
+
+# ---------------------------------------------------------------------------
+# Лимиты: минутный vs дневной, ожидание, ротация ключей
+# ---------------------------------------------------------------------------
+
+_DAILY = (
+    "429 RESOURCE_EXHAUSTED. quotaId: "
+    "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [_DAILY, "429 quota exceeded per_day", "429 Daily limit reached"],
+)
+def test_is_daily_quota_detects_markers(message):
+    assert ai._is_daily_quota(Exception(message)) is True
+
+
+def test_is_daily_quota_false_for_per_minute_limit():
+    assert ai._is_daily_quota(Exception("429 RESOURCE_EXHAUSTED. PerMinute")) is False
+
+
+def test_rate_limit_wait_grows_and_caps(monkeypatch):
+    monkeypatch.setattr(ai, "RATE_LIMIT_MAX_WAIT", 60)
+
+    waits = [ai._rate_limit_wait(n) for n in range(1, 7)]
+
+    assert waits == sorted(waits)          # не убывает
+    assert max(waits) == 60                # упирается в предел
+    assert waits[0] > 0
+
+
+def test_ask_ai_reports_daily_quota(fake_gemini, one_retry):
+    daily = Exception(_DAILY)
+    fake_gemini({ai.PRIMARY_MODEL: daily, ai.FALLBACK_MODEL: daily})
+
+    with pytest.raises(ai.AIError) as excinfo:
+        asyncio.run(ai.ask_ai("привет", []))
+
+    assert "дневной" in str(excinfo.value).lower()
+
+
+def test_ask_ai_waits_then_succeeds_on_minute_limit(fake_gemini, monkeypatch):
+    """429 без признака дневной квоты: ждём и повторяем, а не падаем сразу."""
+    monkeypatch.setattr(ai, "RATE_LIMIT_RETRIES", 3)
+    fake = fake_gemini({ai.PRIMARY_MODEL: [Exception("429 PerMinute"), "ответ после ожидания"]})
+
+    assert asyncio.run(ai.ask_ai("привет", [])) == "ответ после ожидания"
+    assert len(fake.calls) == 2
+
+
+def test_ask_ai_rotates_to_next_key_on_quota(monkeypatch):
+    """Два ключа: первый исчерпан — берём второй, а не отдаём ошибку."""
+
+    class QuotaModels:
+        def generate_content(self, *, model, contents, config=None):
+            raise Exception(_DAILY)
+
+        def list(self):
+            return []
+
+    class OkModels:
+        def generate_content(self, *, model, contents, config=None):
+            return SimpleNamespace(text="ответ второго ключа", candidates=[])
+
+        def list(self):
+            return []
+
+    class FakeClient2:
+        def __init__(self, models):
+            self.models = models
+
+    quota_client = FakeClient2(QuotaModels())
+    ok_client = FakeClient2(OkModels())
+    monkeypatch.setattr(ai, "clients", [quota_client, ok_client])
+    monkeypatch.setattr(ai, "client", quota_client)
+    monkeypatch.setattr(ai, "_models_checked", True)
+    monkeypatch.setattr(ai, "PRIMARY_MODEL", "m")
+    monkeypatch.setattr(ai, "FALLBACK_MODEL", "")
+
+    assert asyncio.run(ai.ask_ai("привет", [])) == "ответ второго ключа"
 
 
 # ---------------------------------------------------------------------------

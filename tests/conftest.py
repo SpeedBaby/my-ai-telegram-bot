@@ -65,7 +65,10 @@ def fake_gemini(monkeypatch):
 
     def install(responses=None, available=None) -> FakeModels:
         fake = FakeModels(responses=responses, available=available)
-        monkeypatch.setattr(ai, "client", FakeClient(fake))
+        fake_client = FakeClient(fake)
+        monkeypatch.setattr(ai, "client", fake_client)
+        # ask_ai перебирает ключи из ai.clients — подменяем и его.
+        monkeypatch.setattr(ai, "clients", [fake_client])
         # Валидация имён моделей при первом запросе не нужна в тестах.
         monkeypatch.setattr(ai, "_models_checked", True)
         return fake
