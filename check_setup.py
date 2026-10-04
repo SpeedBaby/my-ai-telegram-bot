@@ -1,6 +1,6 @@
 """
 Быстрая самопроверка перед запуском и деплоем.
-
+про
     python check_setup.py
 
 Проверяет по-настоящему:
@@ -116,8 +116,8 @@ async def check_telegram(token: str) -> bool:
     return True
 
 
-async def _try_generate(client, types, model: str) -> str | None:
-    """Одна проверка модели: вернуть текст ответа или None при ошибке."""
+async def _try_generate(client, types, model: str) -> tuple[str, str | None]:
+    """Одна проверка модели: (текст_ответа_или_пусто, текст_ошибки_или_None)."""
     try:
         response = await client.aio.models.generate_content(
             model=model,
@@ -129,9 +129,9 @@ async def _try_generate(client, types, model: str) -> str | None:
                 max_output_tokens=256,
             ),
         )
-    except Exception:  # noqa: BLE001
-        return None
-    return (response.text or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        return "", f"{type(exc).__name__}: {exc}"
+    return (response.text or "").strip(), None
 
 
 # Модели, которые не умеют обычный текстовый ответ (озвучка, картинки и т.п.).
@@ -188,7 +188,7 @@ async def check_gemini(key: str) -> bool:
     except Exception as exc:  # noqa: BLE001
         print(f"[WARN] Не удалось получить список моделей: {type(exc).__name__}: {exc}")
 
-    answer = await _try_generate(client, types, model)
+    answer, error = await _try_generate(client, types, model)
     if answer:
         print(f"[OK]   Gemini {model}: {answer[:60]!r}")
         return True
@@ -198,16 +198,28 @@ async def check_gemini(key: str) -> bool:
     candidates = [m for m in available if _looks_like_text_model(m) and m != model]
     # Сначала известные хорошие, потом остальные.
     candidates.sort(key=lambda n: (n not in _GOOD_MODELS, n))
+    last_error = error
     for candidate in candidates[:6]:
         print(f"       ... пробую {candidate}")
-        text = await _try_generate(client, types, candidate)
+        text, err = await _try_generate(client, types, candidate)
         if text:
             print(f"[OK]   Рабочая модель найдена: {candidate}")
             print(f"       -> поставь GEMINI_MODEL={candidate} (и в Render тоже)")
             return True
+        last_error = err or last_error
 
-    print("       -> ни одна текстовая модель не ответила. "
-          "Проверь ключ и регион: https://ai.google.dev/gemini-api/docs/available-regions")
+    # Самая частая причина: региональная блокировка Google.
+    if last_error and (
+        "location is not supported" in last_error.lower()
+        or "failed_precondition" in last_error.lower()
+    ):
+        print("       -> Google Gemini API НЕДОСТУПЕН из твоего региона.")
+        print("          Это ограничение Google, а не код/ключ. Список стран: "
+              "https://ai.google.dev/gemini-api/docs/available-regions")
+        print("          Запусти бота на Render (США) или используй VPN.")
+    else:
+        print("       -> ни одна текстовая модель не ответила. "
+              "Проверь ключ: https://aistudio.google.com/apikey")
     return False
 
 

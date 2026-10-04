@@ -107,6 +107,36 @@ def test_is_rate_limit_is_false_for_other_api_codes():
 
 
 # ---------------------------------------------------------------------------
+# _is_region_blocked
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "400 FAILED_PRECONDITION. User location is not supported for the API use.",
+        "FAILED_PRECONDITION",
+    ],
+)
+def test_is_region_blocked_detects_markers(message):
+    assert ai._is_region_blocked(Exception(message)) is True
+
+
+def test_is_region_blocked_false_for_other_errors():
+    assert ai._is_region_blocked(Exception("some random error")) is False
+
+
+def test_ask_ai_reports_region_block(fake_gemini, one_retry):
+    region = Exception("400 FAILED_PRECONDITION. User location is not supported for the API use.")
+    fake_gemini({ai.PRIMARY_MODEL: region, ai.FALLBACK_MODEL: region})
+
+    with pytest.raises(ai.AIError) as excinfo:
+        asyncio.run(ai.ask_ai("привет", []))
+
+    assert "регион" in str(excinfo.value).lower()
+
+
+# ---------------------------------------------------------------------------
 # _pick_alternative / validate_models
 # ---------------------------------------------------------------------------
 

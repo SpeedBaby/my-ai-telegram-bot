@@ -7,7 +7,7 @@
 - ✅ **Python 3.12** установлен (`C:\Users\nikit\AppData\Local\Programs\Python\Python312`)
 - ✅ **Git** установлен
 - ✅ **Виртуальное окружение** `.venv` создано, все зависимости стоят
-- ✅ **107 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
+- ✅ **111 тестов** проходят (`.venv\Scripts\python.exe -m pytest -q`)
 - ✅ **Git-репозиторий** инициализирован, ветка `main`, 4 коммита, секретов внутри нет
 - ✅ Файл `.env` создан
 
@@ -268,6 +268,7 @@ ALLOWED_USERS = 123456789
 | `404 NOT_FOUND` от Gemini | Модель недоступна ключу. Бот сам подберёт рабочую; если не вышло — смени `GEMINI_MODEL` на `gemini-2.0-flash` |
 | Модель есть в списке, но даёт `404` | Google ограничивает доступ к `gemini-2.5-*` для новых ключей. Запусти `check_setup.py` — он найдёт рабочую модель |
 | `response modalities (TEXT) is not supported` | Автоподбор брал модель без текста (TTS/аудио) — уже исправлено в коде |
+| `User location is not supported for the API use` | Google блокирует Gemini API в твоём регионе — см. раздел **15.2** |
 | `429 RESOURCE_EXHAUSTED` | Исчерпан бесплатный лимит. Подожди минуту — бот сам попробует резервную модель |
 | Бот отвечает 2–4 раза на одно сообщение | Обычно из-за «сна» Render. Бот теперь пропускает повторные доставки; передеплой, чтобы обновилось |
 | `getMe: Unauthorized` | Неверный BOT_TOKEN |
@@ -302,6 +303,37 @@ python check_setup.py
    локальный прокси, укажи его в `.env`: `HTTPS_PROXY=http://127.0.0.1:порт`
    (бот подхватит его автоматически).
 
+## 15.2. Если Gemini недоступен в твоём регионе
+
+Google ограничивает Gemini API по **геолокации запроса** (по IP). Из России,
+например, API отвечает:
+
+```
+400 FAILED_PRECONDITION. User location is not supported for the API use.
+```
+
+Список поддерживаемых стран: [ai.google.dev/gemini-api/docs/available-regions](https://ai.google.dev/gemini-api/docs/available-regions).
+России в нём нет.
+
+**Что это значит:**
+
+- **Локально (`python bot.py`) Gemini не заработает** — то же самое, что и с
+  Telegram. Твой компьютер физически не может обратиться к API.
+- **На Render (США) регион поддерживается** — там API доступен. Именно поэтому
+  бот должен работать на Render.
+
+**Важно:** `check_setup.py` на твоём компьютере **не может проверить Gemini** —
+он всегда покажет ошибку региона. Это не значит, что ключ плохой. Проверяй
+бота на Render и смотри **Logs**.
+
+**Если и на Render ни одна модель не отвечает:**
+
+1. Создай **новый API-ключ** в [AI Studio](https://aistudio.google.com/apikey)
+   (при создании выбери **Create new project** — свежий проект).
+2. В [Google Cloud Console](https://console.cloud.google.com) → APIs & Services →
+   включи **Generative Language API**.
+3. Обнови `GEMINI_API_KEY` в Render и сделай **Manual Deploy**.
+
 ## 16. Проверка себя (необязательно)
 
 Есть два способа убедиться, что всё в порядке.
@@ -312,7 +344,7 @@ python check_setup.py
 .venv\Scripts\python.exe check_setup.py
 ```
 
-**Тесты** — 107 офлайн-тестов, сеть не нужна:
+**Тесты** — 111 офлайн-тестов, сеть не нужна:
 
 ```
 .venv\Scripts\python.exe -m pytest -q

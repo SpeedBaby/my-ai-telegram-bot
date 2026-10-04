@@ -132,6 +132,12 @@ def _is_rate_limit(exc: Exception) -> bool:
     return "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc)
 
 
+def _is_region_blocked(exc: Exception) -> bool:
+    """Google блокирует Gemini API по региону (например, из России)."""
+    text = str(exc).lower()
+    return "location is not supported" in text or "failed_precondition" in text
+
+
 # ---------------------------------------------------------------------------
 # Model availability check (runs once at startup, never crashes the bot)
 # ---------------------------------------------------------------------------
@@ -342,6 +348,13 @@ async def ask_ai(
     if last_error and _is_rate_limit(last_error):
         raise AIError(
             "Бесплатный лимит запросов к модели исчерпан. Подожди минуту и попробуй снова."
+        )
+    if last_error and _is_region_blocked(last_error):
+        raise AIError(
+            "Google Gemini API недоступен из этого региона. "
+            "Запусти бота на сервере в поддерживаемой стране (Render — США) "
+            "или используй VPN. Подробнее: "
+            "https://ai.google.dev/gemini-api/docs/available-regions"
         )
     if _status_code(last_error) in (401, 403):
         raise AIError("Неверный GEMINI_API_KEY или доступ к модели запрещён.")
