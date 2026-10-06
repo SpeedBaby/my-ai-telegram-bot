@@ -16,6 +16,8 @@ import os
 from google import genai
 from google.genai import types
 
+import providers
+
 log = logging.getLogger("ai")
 
 def _collect_api_keys() -> list[str]:
@@ -458,21 +460,8 @@ async def _ask_with_client(api_client, contents: list[types.Content]) -> str:
     _raise_for_error(last_error, failed_model)
 
 
-async def ask_ai(
-    user_message: str,
-    history: list[tuple[str, str]],
-    image_bytes: bytes | None = None,
-    image_mime: str | None = None,
-) -> str:
-    """
-    Ask the model. Пробует модели, пережидает минутный лимит, а при дневной
-    квоте переключается на следующий ключ (если задано несколько).
-    Raises AIError with a user-friendly message if everything fails.
-    """
-    await _check_models_once()
-
-    contents = _build_contents(history, user_message, image_bytes, image_mime)
-
+async def _ask_gemini(contents: list[types.Content]) -> str:
+    """Спросить Gemini: перебор моделей и ключей, ожидание минутного лимита."""
     last_quota_error: Exception | None = None
     for key_index, api_client in enumerate(clients):
         try:
@@ -496,3 +485,44 @@ async def ask_ai(
         "Слишком много запросов к Gemini за минуту (бесплатный лимит). "
         "Подожди минуту и попробуй снова."
     )
+
+
+async def ask_ai(
+    user_message: str,
+    history: list[tuple[str, str]],
+    image_bytes: bytes | None = None,
+    image_mime: str | None = None,
+) -> str:
+    """
+    Спросить AI. Основной провайдер — Gemini; если он недоступен или исчерпал
+    лимит, а задан GROQ_API_KEY, отвечает резервный провайдер (Groq).
+    Raises AIError with a user-friendly message if everything fails.
+    """
+    await _check_models_once()
+
+    contents = _build_contents(history, user_message, image_bytes, image_mime)
+
+    try:
+        return await _ask_gemini(contents)
+    except AIError as gemini_error:
+        if not providers.is_configured():
+            raise
+        log.warning("Gemini недоступен (%s) — пробую резервный провайдер", gemini_error)
+
+    try:
+        answer = await providers.ask(
+            history=history,
+            user_message=user_message,
+            system_prompt=SYSTEM_PROMPT,
+            image_bytes=image_bytes,
+            image_mime=image_mime,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error("Резервный провайдер тоже не смог ответить: %s", exc)
+        raise AIError(
+            "Не удалось получить ответ ни от Gemini, ни от резервного "
+            "провайдера (Groq). Проверь ключи и лимиты."
+        ) from exc
+
+    log.info("Ответ получен от резервного провайдера (Groq)")
+    return answer

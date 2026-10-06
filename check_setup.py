@@ -1,12 +1,12 @@
 """
 Быстрая самопроверка перед запуском и деплоем.
-про
     python check_setup.py
 
 Проверяет по-настоящему:
   1. BOT_TOKEN — реальный запрос getMe к Telegram.
   2. GEMINI_API_KEY и имя модели — реальный генерационный запрос к Gemini.
-  3. Состояние webhook — чтобы понять, в каком режиме работает бот.
+  3. GROQ_API_KEY (если задан) — проверка резервного провайдера.
+  4. Состояние webhook — чтобы понять, в каком режиме работает бот.
 
 Если Telegram недоступен, скрипт сам определяет, это блокировка провайдером
 или пропавший интернет, и подсказывает, что делать.
@@ -226,12 +226,34 @@ async def check_gemini(key: str) -> bool:
     return False
 
 
+async def check_groq(key: str) -> bool:
+    """Проверка резервного провайдера (Groq). Ненастроенный ключ — не ошибка."""
+    import providers
+
+    # Ключ в check_setup мог измениться после load_dotenv — перечитываем.
+    providers.GROQ_API_KEY = key
+    try:
+        answer = await providers.ask(
+            history=[],
+            user_message="Ответь ровно одно слово: ок",
+            system_prompt="Ты тестируешь соединение. Отвечай одним словом.",
+        )
+        print(f"[OK]   Groq (резерв): {answer[:60]!r}")
+        return True
+    except providers.ProviderError as exc:
+        print(f"[WARN] Резервный провайдер (Groq) не отвечает: {exc}")
+        print("       Это не блокирует бота — Gemini остаётся основным.")
+        print("       Проверь ключ: https://console.groq.com/keys")
+        return False
+
+
 async def main() -> int:
     load_dotenv()
     print(f"Python {sys.version.split()[0]}\n")
 
     token = os.environ.get("BOT_TOKEN", "").strip()
     key = os.environ.get("GEMINI_API_KEY", "").strip()
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
 
     ok = True
 
@@ -246,6 +268,13 @@ async def main() -> int:
         ok = False
     else:
         ok &= await check_gemini(key)
+
+    # Groq — резерв: его отсутствие не ломает запуск.
+    if groq_key:
+        await check_groq(groq_key)
+    else:
+        print("[INFO] GROQ_API_KEY не задан — резервный провайдер выключен "
+              "(ключ: https://console.groq.com/keys)")
 
     print()
     if ok:

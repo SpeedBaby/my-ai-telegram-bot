@@ -601,3 +601,76 @@ def test_generate_sync_empty_text_raises_AIError(fake_gemini):
         ai._generate_sync("m", [])
 
     assert "finish_reason" in str(excinfo.value).lower() or "не вернула текст" in str(excinfo.value).lower()
+
+
+# ---------------------------------------------------------------------------
+# Резервный провайдер (Groq): ai.ask_ai -> providers.ask
+# ---------------------------------------------------------------------------
+
+
+def _quota_exhausted_gemini(fake_gemini, monkeypatch):
+    """Ставит Gemini, который всегда отвечает дневным лимитом."""
+    daily = Exception(
+        "429 RESOURCE_EXHAUSTED. quotaId: "
+        "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+    )
+    fake_gemini({ai.PRIMARY_MODEL: daily, ai.FALLBACK_MODEL: daily})
+    monkeypatch.setattr(ai.providers, "GROQ_API_KEY", "gsk-test")
+    return daily
+
+
+def test_ask_ai_falls_back_to_groq_when_gemini_quota(fake_gemini, monkeypatch):
+    """Gemini исчерпан, Groq настроен — отвечаем из Groq."""
+    _quota_exhausted_gemini(fake_gemini, monkeypatch)
+    calls = []
+
+    async def fake_ask(history, user_message, system_prompt, **kwargs):
+        calls.append(user_message)
+        return "ответ от Groq"
+
+    monkeypatch.setattr(ai.providers, "ask", fake_ask)
+
+    result = asyncio.run(ai.ask_ai("привет", []))
+
+    assert result == "ответ от Groq"
+    assert calls == ["привет"]
+
+
+def test_ask_ai_without_groq_key_reports_gemini_error(fake_gemini, monkeypatch):
+    """Groq не настроен — пользователь видит исходную ошибку Gemini."""
+    _quota_exhausted_gemini(fake_gemini, monkeypatch)
+    monkeypatch.setattr(ai.providers, "GROQ_API_KEY", "")
+
+    with pytest.raises(ai.AIError) as excinfo:
+        asyncio.run(ai.ask_ai("привет", []))
+
+    assert "дневной" in str(excinfo.value).lower()
+
+
+def test_ask_ai_reports_when_groq_also_fails(fake_gemini, monkeypatch):
+    """Оба провайдера молчат — понятная ошибка про обоих."""
+    _quota_exhausted_gemini(fake_gemini, monkeypatch)
+
+    async def broken_ask(history, user_message, system_prompt, **kwargs):
+        raise RuntimeError("Groq недоступен")
+
+    monkeypatch.setattr(ai.providers, "ask", broken_ask)
+
+    with pytest.raises(ai.AIError) as excinfo:
+        asyncio.run(ai.ask_ai("привет", []))
+
+    text = str(excinfo.value).lower()
+    assert "gemini" in text and "groq" in text
+
+
+def test_ask_ai_does_not_call_groq_when_gemini_works(fake_gemini, monkeypatch):
+    """Рабочий Gemini — резерв не трогаем."""
+    fake_gemini({ai.PRIMARY_MODEL: "ответ Gemini"})
+    monkeypatch.setattr(ai.providers, "GROQ_API_KEY", "gsk-test")
+
+    async def should_not_call(*a, **kw):
+        raise AssertionError("Groq вызывать не нужно")
+
+    monkeypatch.setattr(ai.providers, "ask", should_not_call)
+
+    assert asyncio.run(ai.ask_ai("привет", [])) == "ответ Gemini"

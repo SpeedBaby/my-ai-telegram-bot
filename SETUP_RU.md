@@ -120,6 +120,7 @@ GEMINI_FALLBACK_MODEL=gemini-3.5-flash-lite
 AI_RATE_LIMIT_RETRIES=4
 AI_RATE_LIMIT_MAX_WAIT=60
 AI_MAX_OUTPUT_TOKENS=2048
+GROQ_API_KEY=                      ← необязательно, см. раздел 15.4
 ```
 
 > `.env` уже в `.gitignore` — в GitHub он не попадёт.
@@ -337,6 +338,7 @@ Google ограничивает Gemini API по **геолокации запр�
 2. В [Google Cloud Console](https://console.cloud.google.com) → APIs & Services →
    включи **Generative Language API**.
 3. Обнови `GEMINI_API_KEY` в Render и сделай **Manual Deploy**.
+4. Чтобы бот отвечал и без Gemini, подключи резервный провайдер — раздел 15.5.
 
 ## 15.3. Если пишет «лимит запросов исчерпан»
 
@@ -365,7 +367,26 @@ Google ограничивает Gemini API по **геолокации запр�
    длину ответа.
 
 **Полностью «без лимитов» бесплатный тариф не бывает.** Если нужен большой
-объём — несколько проектов с ключами или платный тариф.
+объём — несколько проектов с ключами, Groq в резерве или платный тариф.
+
+## 15.5. Подстраховка: Groq (бесплатно, без карты)
+
+Когда у Gemini исчерпывается лимит, бот уходит на [Groq](https://console.groq.com/keys) —
+там **щедрый бесплатный тариф** и **карта не нужна**.
+
+Как подключить:
+
+1. Зарегистрируйся на [console.groq.com](https://console.groq.com).
+2. Перейди в **API Keys → Create API Key** → скопируй ключ вида `gsk_...`.
+3. Добавь в `.env` строку `GROQ_API_KEY=gsk_...` (локально) или в Render
+   **Environment → Add Variable** → `GROQ_API_KEY` → `gsk_...`.
+
+После этого, если Gemini недоступен (лимит, сбой), бот **автоматически**
+переключится на Groq и напишет в Logs: `Ответ получен от резервного провайдера`.
+
+Через `GROQ_BASE_URL` можно указать любой сервис с OpenAI-совместимым API
+(xAI Grok — `https://api.x.ai/v1`, OpenRouter, локальный Ollama).
+Меняется только адрес и имя модели.
 
 ## 16. Проверка себя (необязательно)
 
