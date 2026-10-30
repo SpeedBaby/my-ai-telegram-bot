@@ -6,10 +6,12 @@ Run locally (no webhook):   python bot.py     (needs no PUBLIC_URL — long poll
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
 import secrets
+from html import escape as html_escape
 import sys
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -23,6 +25,7 @@ from fastapi.responses import PlainTextResponse
 load_dotenv()
 
 from ai import AIError, ask_ai  # noqa: E402  (must import after load_dotenv)
+from formatting import to_telegram_html  # noqa: E402
 from memory import add_message, clear_history, get_history  # noqa: E402
 
 
@@ -81,22 +84,36 @@ PUBLIC_URL = _resolve_public_url()
 _SECRET_SAFE = re.compile(r"[^A-Za-z0-9_-]")
 
 
+def _derive_webhook_secret() -> str:
+    """Вывести стабильный секрет из BOT_TOKEN (HMAC-SHA256).
+
+    Случайный секрет на каждый запуск ломает вебхук после редлоя или
+    сна бесплатного Render: Telegram продолжает слать апдейты на старый
+    путь /telegram/<секрет> со старым токеном в заголовке. BOT_TOKEN не
+    меняется, поэтому путь и секрет остаются одинаковыми между запусками.
+    """
+    token = os.environ.get("BOT_TOKEN", "")
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return digest[:48] if token else secrets.token_urlsafe(32)
+
+
 def _normalize_webhook_secret(raw: str) -> str:
     """Привести WEBHOOK_SECRET к виду, который принимает Telegram."""
     cleaned = _SECRET_SAFE.sub("", raw or "")[:256]
-    # Если после чистки осталось мало символов — секрет слабый, берём свой.
+    # Если после чистки осталось мало символов — секрет слабый, берём производный.
     if len(cleaned) < 16:
-        return secrets.token_urlsafe(32)
+        return _derive_webhook_secret()
     return cleaned
 
 
 _raw_secret = os.environ.get("WEBHOOK_SECRET", "").strip()
 if not _raw_secret or _raw_secret == "change-me":
-    # Секрет не задан: для локального запуска он не нужен, на Render — можно
-    # не задавать. Генерируем свой (стабильный в пределах процесса).
-    WEBHOOK_SECRET = secrets.token_urlsafe(32)
+    # Секрет не задан: берём детерминированный вывод из BOT_TOKEN, чтобы
+    # вебхук переживал рестарты. Локальному запуску он не мешает.
+    WEBHOOK_SECRET = _derive_webhook_secret()
     log.warning(
-        "WEBHOOK_SECRET не задан — сгенерирован случайный на этот запуск."
+        "WEBHOOK_SECRET не задан — использован стабильный секрет, "
+        "выведенный из BOT_TOKEN."
     )
 else:
     WEBHOOK_SECRET = _normalize_webhook_secret(_raw_secret)
@@ -182,19 +199,31 @@ async def tg(method: str, **payload):
 async def send_message(chat_id: int, text: str, reply_to: int | None = None):
     """Send text, splitting by Telegram's 4096-char limit.
 
-    Tries Markdown first; if Telegram rejects the formatting, resends as plain text.
+    Markdown/LaTeX is converted to Telegram HTML (fractions, superscripts,
+    lists, code blocks). If Telegram still rejects the markup, the same chunk
+    is resent as plain text so the user always gets an answer.
     """
-    chunks = _split_text(text, 4000)
+    html = to_telegram_html(text)
+    chunks = _split_text(html, 4000) or [""]
     for i, chunk in enumerate(chunks):
-        payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"}
-        if reply_to and i == 0:
-            payload["reply_to_message_id"] = reply_to
+        reply = {"reply_to_message_id": reply_to} if reply_to and i == 0 else {}
         try:
-            await tg("sendMessage", **payload)
+            await tg(
+                "sendMessage",
+                chat_id=chat_id,
+                text=chunk,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                **reply,
+            )
         except RuntimeError:
-            payload.pop("parse_mode", None)
-            await tg("sendMessage", **payload)
-
+            # Telegram не разобрал HTML — отправляем тем же текстом без разметки.
+            await tg(
+                "sendMessage",
+                chat_id=chat_id,
+                text=html_escape(chunk),
+                **reply,
+            )
 
 def _split_text(text: str, limit: int) -> list[str]:
     """Split on paragraph boundaries where possible so code blocks are less likely to break."""
@@ -333,6 +362,38 @@ async def process_update(update: dict):
             "Просто напиши вопрос или пришли фото.\n\n"
             "Команды:\n"
             "/start — эта справка\n"
+            "/help — что я умею и как со мной работать\n"
+            "/reset — очистить память диалога\n"
+            "/id — твой идентификатор\n"
+            "/about — информация о боте",
+            reply_to=message_id,
+        )
+        return
+
+    if command == "/help":
+        await send_message(
+            chat_id,
+            "🤖 AI-ассистент в Telegram\n\n"
+            "Что я умею:\n"
+            "• отвечать на вопросы и вести диалог — можно писать как в обычном чате;\n"
+            "• понимать фотографии: описывать содержимое, читать текст, разбирать "
+            "скриншоты кода и сообщений об ошибках;\n"
+            "• помогать с кодом: Python, JavaScript/TypeScript, C++, HTML/CSS и другие "
+            "языки — присылай фрагмент и описывай задачу;\n"
+            "• писать и править тексты: письма, статьи, переводы, конспекты;\n"
+            "• помнить контекст: последние сообщения диалога остаются в памяти.\n\n"
+            "Как со мной работать:\n"
+            "1. Пиши вопросы текстом — коротко или подробно, как удобнее.\n"
+            "2. При необходимости прикрепи фото или скриншот — опишу, что на нём.\n"
+            "3. Если ответы стали слишком общими или память засорилась — отправь /reset.\n\n"
+            "Что стоит знать:\n"
+            "• у ответов есть ограничение по длине — длинные тексты я разбиваю на "
+            "несколько сообщений;\n"
+            "• я не выполняю код и не имею доступа к интернету — только анализирую то, "
+            "что ты прислал.\n\n"
+            "Команды:\n"
+            "/start — краткая справка\n"
+            "/help — этот список\n"
             "/reset — очистить память диалога\n"
             "/id — твой идентификатор\n"
             "/about — информация о боте",
@@ -346,7 +407,7 @@ async def process_update(update: dict):
         return
 
     if command == "/id":
-        await send_message(chat_id, f"Твой user_id: `{user_id}`", reply_to=message_id)
+        await send_message(chat_id, f"Твой user_id: <code>{user_id}</code>", reply_to=message_id)
         return
 
     if command == "/about":
@@ -361,7 +422,7 @@ async def process_update(update: dict):
 
     if text.startswith("/"):
         await send_message(
-            chat_id, "Не знаю такую команду. Напиши /start", reply_to=message_id
+            chat_id, "Не знаю такую команду. Напиши /start или /help", reply_to=message_id
         )
         return
 
@@ -441,22 +502,43 @@ async def set_webhook():
     log.info("Webhook configured: %s", result)
 
 
+# setWebhook вызывается один раз на старт; если Telegram недоступен
+# (таймаут, 5xx), вебхук не настроится до следующего деплоя — бот будет
+# молчать. Пробуем несколько раз с нарастающей паузой.
+WEBHOOK_SETUP_ATTEMPTS = 5
+WEBHOOK_SETUP_BACKOFF = 10  # seconds, doubled every attempt
+
+
 async def _configure_webhook() -> None:
-    try:
-        await set_webhook()
-    except TelegramError as exc:
-        if exc.error_code in (401, 404):
-            log.error(
-                "Telegram отклонил BOT_TOKEN (код %s: %s). "
-                "Перевыпусти токен у @BotFather (/mybots -> API Token -> Revoke) "
-                "и обнови переменную BOT_TOKEN в Render, затем сделай Manual Deploy.",
-                exc.error_code,
-                exc.description,
+    delay = WEBHOOK_SETUP_BACKOFF
+    for attempt in range(1, WEBHOOK_SETUP_ATTEMPTS + 1):
+        try:
+            await set_webhook()
+            return
+        except TelegramError as exc:
+            if exc.error_code in (401, 404):
+                log.error(
+                    "Telegram отклонил BOT_TOKEN (код %s: %s). "
+                    "Перевыпусти токен у @BotFather (/mybots -> API Token -> Revoke) "
+                    "и обнови переменную BOT_TOKEN в Render, затем сделай Manual Deploy.",
+                    exc.error_code,
+                    exc.description,
+                )
+                return
+            log.warning(
+                "setWebhook attempt %d/%d failed: %s (retry in %ds)",
+                attempt, WEBHOOK_SETUP_ATTEMPTS, exc.description, delay,
             )
-        else:
-            log.exception("Could not configure Telegram webhook")
-    except Exception:
-        log.exception("Could not configure Telegram webhook")
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "setWebhook attempt %d/%d failed: %s (retry in %ds)",
+                attempt, WEBHOOK_SETUP_ATTEMPTS, exc, delay,
+            )
+        if attempt < WEBHOOK_SETUP_ATTEMPTS:
+            await asyncio.sleep(delay)
+            delay *= 2
+    log.error("Could not configure Telegram webhook after %d attempts",
+              WEBHOOK_SETUP_ATTEMPTS)
 
 
 @asynccontextmanager

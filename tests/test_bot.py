@@ -519,10 +519,17 @@ def test_configure_webhook_does_not_crash_on_unknown_error(monkeypatch, caplog):
     async def broken_set_webhook():
         raise RuntimeError("boom")
 
+    async def no_sleep(_delay):
+        return
+
     monkeypatch.setattr(bot, "set_webhook", broken_set_webhook)
+    monkeypatch.setattr(bot.asyncio, "sleep", no_sleep)
 
     with caplog.at_level(logging.ERROR, logger="ai-bot"):
         asyncio.run(bot._configure_webhook())  # не должно бросить исключение
+
+    # Ретраи действительно были, но исчерпавшись, функция тихо вернула управление.
+    assert "after" in caplog.text
 
 
 # ---------------------------------------------------------------------------
