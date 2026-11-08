@@ -24,8 +24,9 @@ from fastapi.responses import PlainTextResponse
 # Load .env for local runs. On Render variables come from the dashboard.
 load_dotenv()
 
-from ai import AIError, ask_ai  # noqa: E402  (must import after load_dotenv)
+from ai import AIError, ask_ai, warm_up  # noqa: E402  (must import after load_dotenv)
 from formatting import to_telegram_html  # noqa: E402
+from media import generate_image, generate_video  # noqa: E402
 from memory import add_message, clear_history, get_history  # noqa: E402
 
 
@@ -248,6 +249,58 @@ def _split_text(text: str, limit: int) -> list[str]:
     return chunks
 
 
+async def _upload_file(
+    method: str,
+    file_field: str,
+    file_bytes: bytes,
+    filename: str,
+    mime_type: str,
+    **fields,
+):
+    """Отправить файл (фото/видео) в Telegram через multipart/form-data."""
+    async with httpx.AsyncClient(timeout=180) as client:
+        r = await client.post(
+            f"{TG_API}/{method}",
+            data=fields,
+            files={file_field: (filename, file_bytes, mime_type)},
+        )
+        data = r.json()
+        if not data.get("ok"):
+            raise TelegramError(method, data)
+        return data["result"]
+
+
+async def send_photo(
+    chat_id: int,
+    image_bytes: bytes,
+    mime_type: str,
+    caption: str = "",
+    reply_to: int | None = None,
+):
+    filename = "photo.png" if "png" in mime_type else "photo.jpg"
+    fields = {"chat_id": chat_id}
+    if caption:
+        fields["caption"] = caption[:1000]
+    if reply_to:
+        fields["reply_to_message_id"] = reply_to
+    await _upload_file("sendPhoto", "photo", image_bytes, filename, mime_type, **fields)
+
+
+async def send_video(
+    chat_id: int,
+    video_bytes: bytes,
+    mime_type: str,
+    caption: str = "",
+    reply_to: int | None = None,
+):
+    fields = {"chat_id": chat_id}
+    if caption:
+        fields["caption"] = caption[:1000]
+    if reply_to:
+        fields["reply_to_message_id"] = reply_to
+    await _upload_file("sendVideo", "video", video_bytes, "video.mp4", mime_type, **fields)
+
+
 async def send_typing(chat_id: int):
     try:
         await tg("sendChatAction", chat_id=chat_id, action="typing")
@@ -325,6 +378,64 @@ async def answer_and_reply(
         typing_task.cancel()
 
 
+def _parse_command(text: str) -> tuple[str, str]:
+    """Разобрать команду: ('/image', 'кот-космонавт на Марсе')."""
+    parts = text.strip().split(maxsplit=1)
+    cmd = parts[0].split("@")[0].lower() if parts else ""
+    arg = parts[1].strip() if len(parts) > 1 else ""
+    return cmd, arg
+
+
+async def _handle_image(chat_id: int, reply_to: int | None, prompt: str):
+    if not prompt:
+        await send_message(
+            chat_id,
+            "Напиши, что нарисовать. Пример:\n/image кот-космонавт на Марсе",
+            reply_to=reply_to,
+        )
+        return
+    await send_message(chat_id, "🎨 Генерирую изображение…", reply_to=reply_to)
+    try:
+        image_bytes, mime = await generate_image(prompt)
+    except AIError as exc:
+        await send_message(chat_id, f"⚠️ {exc}", reply_to=reply_to)
+        return
+    except Exception:  # noqa: BLE001
+        log.exception("Image generation failed")
+        await send_message(
+            chat_id, "Не удалось сгенерировать изображение. Попробуй позже.", reply_to=reply_to
+        )
+        return
+    await send_photo(chat_id, image_bytes, mime, caption=prompt, reply_to=reply_to)
+
+
+async def _handle_video(chat_id: int, reply_to: int | None, prompt: str):
+    if not prompt:
+        await send_message(
+            chat_id,
+            "Напиши, что снять. Пример:\n/video закат над океаном",
+            reply_to=reply_to,
+        )
+        return
+    await send_message(
+        chat_id,
+        "🎬 Генерирую видео… это займёт 1–3 минуты, не уходи далеко 🙂",
+        reply_to=reply_to,
+    )
+    try:
+        video_bytes, mime = await generate_video(prompt)
+    except AIError as exc:
+        await send_message(chat_id, f"⚠️ {exc}", reply_to=reply_to)
+        return
+    except Exception:  # noqa: BLE001
+        log.exception("Video generation failed")
+        await send_message(
+            chat_id, "Не удалось сгенерировать видео. Попробуй позже.", reply_to=reply_to
+        )
+        return
+    await send_video(chat_id, video_bytes, mime, caption=prompt, reply_to=reply_to)
+
+
 async def process_update(update: dict):
     # Support both new messages and edited ones.
     message = update.get("message") or update.get("edited_message")
@@ -357,12 +468,15 @@ async def process_update(update: dict):
             "Я умею:\n"
             "• отвечать на вопросы и вести диалог;\n"
             "• распознавать фотографии (в том числе текст и код на фото);\n"
+            "• генерировать картинки и короткие видео по описанию;\n"
             "• помогать с Python, JavaScript, C++, HTML/CSS и другими языками;\n"
             "• помнить последние сообщения диалога.\n\n"
             "Просто напиши вопрос или пришли фото.\n\n"
             "Команды:\n"
             "/start — эта справка\n"
             "/help — что я умею и как со мной работать\n"
+            "/image — нарисовать картинку по описанию\n"
+            "/video — снять короткое видео по описанию\n"
             "/reset — очистить память диалога\n"
             "/id — твой идентификатор\n"
             "/about — информация о боте",
@@ -380,12 +494,15 @@ async def process_update(update: dict):
             "скриншоты кода и сообщений об ошибках;\n"
             "• помогать с кодом: Python, JavaScript/TypeScript, C++, HTML/CSS и другие "
             "языки — присылай фрагмент и описывай задачу;\n"
+            "• генерировать картинки (/image) и короткие видео (/video) по описанию;\n"
             "• писать и править тексты: письма, статьи, переводы, конспекты;\n"
             "• помнить контекст: последние сообщения диалога остаются в памяти.\n\n"
             "Как со мной работать:\n"
             "1. Пиши вопросы текстом — коротко или подробно, как удобнее.\n"
-            "2. При необходимости прикрепи фото или скриншот — опишу, что на нём.\n"
-            "3. Если ответы стали слишком общими или память засорилась — отправь /reset.\n\n"
+            "2. Прикрепи фото или скриншот — опишу, что на нём.\n"
+            "3. Напиши /image описание — нарисую картинку.\n"
+            "4. Напиши /video описание — сниму короткое видео (1–3 минуты).\n"
+            "5. Если ответы стали слишком общими или память засорилась — отправь /reset.\n\n"
             "Что стоит знать:\n"
             "• у ответов есть ограничение по длине — длинные тексты я разбиваю на "
             "несколько сообщений;\n"
@@ -394,6 +511,8 @@ async def process_update(update: dict):
             "Команды:\n"
             "/start — краткая справка\n"
             "/help — этот список\n"
+            "/image — нарисовать картинку\n"
+            "/video — снять короткое видео\n"
             "/reset — очистить память диалога\n"
             "/id — твой идентификатор\n"
             "/about — информация о боте",
@@ -421,6 +540,13 @@ async def process_update(update: dict):
         return
 
     if text.startswith("/"):
+        cmd_word, cmd_arg = _parse_command(text)
+        if cmd_word in ("/image", "/img", "/pic"):
+            await _handle_image(chat_id, message_id, cmd_arg)
+            return
+        if cmd_word in ("/video", "/vid"):
+            await _handle_video(chat_id, message_id, cmd_arg)
+            return
         await send_message(
             chat_id, "Не знаю такую команду. Напиши /start или /help", reply_to=message_id
         )
@@ -549,6 +675,8 @@ async def lifespan(app: FastAPI):
         spawn(_configure_webhook())
     else:
         log.warning("PUBLIC_URL is not set; webhook was not configured.")
+    # Прогреваем список моделей сразу, чтобы первое сообщение не ждало опрос Google.
+    spawn(warm_up())
     yield
 
 

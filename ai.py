@@ -352,6 +352,16 @@ async def _check_models_once() -> None:
     await asyncio.to_thread(validate_models)
 
 
+async def warm_up() -> None:
+    """Проверить доступные модели заранее, при старте, а не на первом сообщении.
+
+    Первый запрос после пробуждения/деплоя иначе ждёт 1–2 секунды, пока
+    `client.models.list()` опрашивает Google. Вызывается из lifespan как фоновая
+    задача, поэтому health-check и приём сообщений не блокируются.
+    """
+    await _check_models_once()
+
+
 class _QuotaExhausted(Exception):
     """Все модели на текущем ключе упёрлись в лимит запросов."""
 

@@ -6,3 +6,4 @@ memory.db
 .pytest_cache/
 .vscode/
 .idea/
+_tmp/
